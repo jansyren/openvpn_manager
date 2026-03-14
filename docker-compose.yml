@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: openvpn
+      POSTGRES_PASSWORD: openvpn
+      POSTGRES_DB: openvpn_manager
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openvpn -d openvpn_manager"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    volumes:
+      - ./backups:/app/backups
+      - ./private.pem:/app/private.pem:ro
+      - ./public.pem:/app/public.pem:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+      - "12443:443"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  db_data:

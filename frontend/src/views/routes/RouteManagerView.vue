@@ -1,0 +1,341 @@
+<template>
+  <div>
+    <div class="page-header">
+      <h1 class="page-title">Route Manager</h1>
+      <div class="action-btns">
+        <Button label="Add Route" icon="pi pi-plus" @click="openAddDialog" />
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <Select
+        v-model="selectedServerId"
+        :options="serverOptions"
+        option-label="label"
+        option-value="value"
+        placeholder="All Servers"
+        show-clear
+        class="filter-select"
+        @change="loadRoutes"
+      />
+      <Button
+        label="Show Live Routing Table"
+        icon="pi pi-table"
+        severity="secondary"
+        :loading="liveLoading"
+        :disabled="!selectedServerId"
+        @click="loadLiveRoutes"
+      />
+    </div>
+
+    <Panel v-if="liveRoutes !== null" header="Live Routing Table" toggleable class="live-panel">
+      <pre class="live-output">{{ liveRoutes.routes.join('\n') || 'Empty routing table.' }}</pre>
+    </Panel>
+
+    <DataTable :value="routes" :loading="loading" striped-rows>
+      <template #empty>No routes found.</template>
+      <Column header="Server">
+        <template #body="{ data }">{{ serverName(data.server_id) }}</template>
+      </Column>
+      <Column field="source_tun" header="Source TUN" />
+      <Column field="dest_tun" header="Dest TUN" />
+      <Column field="destination_network" header="Destination Network" />
+      <Column field="metric" header="Metric" />
+      <Column header="Persistent">
+        <template #body="{ data }">
+          <Tag :value="data.is_persistent ? 'Yes' : 'No'" :severity="data.is_persistent ? 'success' : 'secondary'" />
+        </template>
+      </Column>
+      <Column header="Active">
+        <template #body="{ data }">
+          <Tag :value="data.is_active ? 'Active' : 'Inactive'" :severity="data.is_active ? 'success' : 'secondary'" />
+        </template>
+      </Column>
+      <Column header="Actions" style="width: 10rem">
+        <template #body="{ data }">
+          <Button
+            v-if="!data.is_active"
+            icon="pi pi-play"
+            severity="success"
+            text
+            rounded
+            v-tooltip="'Apply route'"
+            :loading="applyingId === data.id"
+            @click="applyRoute(data)"
+          />
+          <Button
+            v-else
+            icon="pi pi-stop"
+            severity="warn"
+            text
+            rounded
+            v-tooltip="'Remove route'"
+            :loading="applyingId === data.id"
+            @click="removeRoute(data)"
+          />
+          <Button
+            icon="pi pi-trash"
+            severity="danger"
+            text
+            rounded
+            @click="confirmDelete(data)"
+          />
+        </template>
+      </Column>
+    </DataTable>
+
+    <!-- Add Route Dialog -->
+    <Dialog v-model:visible="addDialogVisible" header="Add Route" modal style="width: 480px">
+      <div class="field">
+        <label>Server *</label>
+        <Select
+          v-model="form.server_id"
+          :options="serverOptions"
+          option-label="label"
+          option-value="value"
+          placeholder="Select server"
+          class="w-full"
+        />
+      </div>
+      <div class="field">
+        <label>Source TUN *</label>
+        <InputText v-model="form.source_tun" class="w-full" placeholder="tun0" />
+      </div>
+      <div class="field">
+        <label>Dest TUN *</label>
+        <InputText v-model="form.dest_tun" class="w-full" placeholder="tun1" />
+      </div>
+      <div class="field">
+        <label>Destination Network *</label>
+        <InputText v-model="form.destination_network" class="w-full" placeholder="10.8.0.0/24" />
+      </div>
+      <div class="field">
+        <label>Metric</label>
+        <InputNumber v-model="form.metric" class="w-full" :min="0" />
+      </div>
+      <div class="field field-inline">
+        <Checkbox v-model="form.is_persistent" :binary="true" input-id="persistent" />
+        <label for="persistent">Persistent</label>
+      </div>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" @click="addDialogVisible = false" />
+        <Button label="Create" :loading="saving" @click="createRoute" />
+      </template>
+    </Dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import Button from 'primevue/button'
+import Tag from 'primevue/tag'
+import Dialog from 'primevue/dialog'
+import Select from 'primevue/select'
+import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
+import Checkbox from 'primevue/checkbox'
+import Panel from 'primevue/panel'
+import { useServersStore } from '@/stores/servers'
+import { routesApi } from '@/api/routes'
+import type { RouteRead, LiveRoutingTable } from '@/types'
+
+const toast = useToast()
+const confirm = useConfirm()
+const serversStore = useServersStore()
+
+const routes = ref<RouteRead[]>([])
+const loading = ref(false)
+const liveRoutes = ref<LiveRoutingTable | null>(null)
+const liveLoading = ref(false)
+const selectedServerId = ref<number | null>(null)
+const addDialogVisible = ref(false)
+const saving = ref(false)
+const applyingId = ref<number | null>(null)
+
+const form = ref({
+  server_id: null as number | null,
+  source_tun: '',
+  dest_tun: '',
+  destination_network: '',
+  metric: 0,
+  is_persistent: false,
+})
+
+const serverOptions = computed(() =>
+  serversStore.servers.map((s) => ({ label: s.name, value: s.id })),
+)
+
+function serverName(serverId: number): string {
+  return serversStore.servers.find((s) => s.id === serverId)?.name ?? String(serverId)
+}
+
+async function loadRoutes() {
+  loading.value = true
+  liveRoutes.value = null
+  try {
+    routes.value = await routesApi.list(selectedServerId.value ?? undefined)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load routes', life: 4000 })
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadLiveRoutes() {
+  if (!selectedServerId.value) return
+  liveLoading.value = true
+  try {
+    liveRoutes.value = await routesApi.getLive(selectedServerId.value)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load live routes', life: 4000 })
+  } finally {
+    liveLoading.value = false
+  }
+}
+
+function openAddDialog() {
+  form.value = { server_id: selectedServerId.value, source_tun: '', dest_tun: '', destination_network: '', metric: 0, is_persistent: false }
+  addDialogVisible.value = true
+}
+
+async function createRoute() {
+  if (!form.value.server_id || !form.value.source_tun || !form.value.dest_tun || !form.value.destination_network) {
+    toast.add({ severity: 'warn', summary: 'Validation', detail: 'Server, source TUN, dest TUN and destination network are required.', life: 3000 })
+    return
+  }
+  saving.value = true
+  try {
+    await routesApi.create({
+      server_id: form.value.server_id,
+      source_tun: form.value.source_tun,
+      dest_tun: form.value.dest_tun,
+      destination_network: form.value.destination_network,
+      metric: form.value.metric,
+      is_persistent: form.value.is_persistent,
+    })
+    toast.add({ severity: 'success', summary: 'Created', detail: 'Route created.', life: 3000 })
+    addDialogVisible.value = false
+    await loadRoutes()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to create route', life: 4000 })
+  } finally {
+    saving.value = false
+  }
+}
+
+async function applyRoute(route: RouteRead) {
+  applyingId.value = route.id
+  try {
+    await routesApi.apply(route.id)
+    toast.add({ severity: 'success', summary: 'Applied', detail: 'Route applied.', life: 3000 })
+    await loadRoutes()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to apply route', life: 4000 })
+  } finally {
+    applyingId.value = null
+  }
+}
+
+async function removeRoute(route: RouteRead) {
+  applyingId.value = route.id
+  try {
+    await routesApi.remove(route.id)
+    toast.add({ severity: 'success', summary: 'Removed', detail: 'Route deactivated.', life: 3000 })
+    await loadRoutes()
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to remove route', life: 4000 })
+  } finally {
+    applyingId.value = null
+  }
+}
+
+function confirmDelete(route: RouteRead) {
+  confirm.require({
+    message: `Delete route to "${route.destination_network}"?`,
+    header: 'Confirm Delete',
+    icon: 'pi pi-exclamation-triangle',
+    severity: 'danger',
+    accept: async () => {
+      try {
+        await routesApi.delete(route.id)
+        toast.add({ severity: 'success', summary: 'Deleted', detail: 'Route deleted.', life: 3000 })
+        await loadRoutes()
+      } catch (e) {
+        toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to delete', life: 4000 })
+      }
+    },
+  })
+}
+
+onMounted(async () => {
+  await serversStore.fetchServers()
+  await loadRoutes()
+})
+</script>
+
+<style scoped>
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+.page-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.action-btns {
+  display: flex;
+  gap: 0.5rem;
+}
+.filter-bar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.filter-select {
+  min-width: 220px;
+}
+.live-panel {
+  margin-bottom: 1.5rem;
+}
+.live-output {
+  background: var(--p-surface-900);
+  color: var(--p-surface-100);
+  padding: 1rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.field {
+  margin-bottom: 1rem;
+}
+.field label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.field-inline label {
+  margin-bottom: 0;
+}
+.w-full {
+  width: 100%;
+}
+</style>
