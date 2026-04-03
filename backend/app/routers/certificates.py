@@ -74,7 +74,13 @@ async def revoke_certificate(
 
     instance = await _get_instance_for_cert(cert, db)
 
-    if body.ca_passphrase and instance:
+    # Resolve CA passphrase: use provided value or fall back to stored instance passphrase
+    ca_passphrase = body.ca_passphrase
+    if not ca_passphrase and instance and instance.ca_passphrase_encrypted_blob:
+        from app.core.security import decrypt_ca_passphrase
+        ca_passphrase = decrypt_ca_passphrase(instance.ca_passphrase_encrypted_blob)
+
+    if ca_passphrase and instance:
         pki_dir = _resolve_pki_dir(instance)
         easyrsa_path = instance.easyrsa_path or easyrsa_service.DEFAULT_EASYRSA_PATH
         easyrsa_server_id = (
@@ -85,7 +91,7 @@ async def revoke_certificate(
         server = await get_server(db, easyrsa_server_id)
         executor = get_executor(server)
         await easyrsa_service.revoke_cert(
-            executor, easyrsa_path, pki_dir, cert.common_name, body.ca_passphrase, body.reason,
+            executor, easyrsa_path, pki_dir, cert.common_name, ca_passphrase, body.reason,
             use_sudo=instance.easyrsa_use_sudo if instance else False,
         )
 
@@ -135,8 +141,14 @@ async def renew_certificate(
     server = await get_server(db, easyrsa_server_id)
     executor = get_executor(server)
 
+    # Resolve CA passphrase: use provided value or fall back to stored instance passphrase
+    ca_passphrase = body.ca_passphrase
+    if not ca_passphrase and instance.ca_passphrase_encrypted_blob:
+        from app.core.security import decrypt_ca_passphrase
+        ca_passphrase = decrypt_ca_passphrase(instance.ca_passphrase_encrypted_blob)
+
     await easyrsa_service.renew_cert(
-        executor, easyrsa_path, pki_dir, cert.common_name, body.ca_passphrase, body.expire_days,
+        executor, easyrsa_path, pki_dir, cert.common_name, ca_passphrase or "", body.expire_days,
         use_sudo=instance.easyrsa_use_sudo,
     )
 

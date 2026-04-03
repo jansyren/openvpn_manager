@@ -10,8 +10,7 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.core.exceptions import AppError, app_error_handler, http_exception_handler
 from app.core.logging import RequestLoggingMiddleware, configure_logging
-from app.db.base import Base
-from app.db.session import get_engine
+
 from app.routers import auth, backup, certificates, clients, deploy, easyrsa, pam, routes, servers, system, users, vpn_instances
 
 
@@ -19,11 +18,6 @@ from app.routers import auth, backup, certificates, clients, deploy, easyrsa, pa
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     configure_logging(debug=settings.app_debug)
-
-    # Create tables (use Alembic in production instead)
-    if settings.app_env == "development":
-        async with get_engine().begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
 
     # Ensure backup storage directory exists
     settings.backup_storage_path.mkdir(parents=True, exist_ok=True)
@@ -61,7 +55,7 @@ def create_app() -> FastAPI:
     # ── CORS ────────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_allowed_origins,
+        allow_origins=settings.cors_origins_list,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],

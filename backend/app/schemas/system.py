@@ -44,7 +44,6 @@ class DeployPrerequisites(BaseModel):
 
 
 class DeployRequest(BaseModel):
-    server_id: int
     openvpn_config_dir: str = "/etc/openvpn"
     easyrsa_install_dir: str = "/etc/easy-rsa"
     install_openvpn: bool = True

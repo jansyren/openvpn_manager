@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, RemoteExecutionError
-from app.core.security import encrypt_ssh_key
+from app.core.security import encrypt_ssh_key, encrypt_sudo_password
 from app.db.models.server import Server
 from app.schemas.server import ServerCreate, ServerUpdate
 from app.services.remote.local_executor import LocalExecutor
@@ -45,6 +45,9 @@ async def create_server(db: AsyncSession, data: ServerCreate) -> Server:
         key_bytes = data.ssh_private_key_pem.encode()
         kwargs["ssh_key_encrypted_blob"] = encrypt_ssh_key(key_bytes)
 
+    if data.sudo_password:
+        kwargs["sudo_password_encrypted_blob"] = encrypt_sudo_password(data.sudo_password)
+
     server = Server(**kwargs)
     db.add(server)
     await db.flush()
@@ -66,6 +69,8 @@ async def update_server(db: AsyncSession, server_id: int, data: ServerUpdate) ->
         server.ssh_username = data.ssh_username
     if data.ssh_private_key_pem is not None:
         server.ssh_key_encrypted_blob = encrypt_ssh_key(data.ssh_private_key_pem.encode())
+    if data.sudo_password is not None:
+        server.sudo_password_encrypted_blob = encrypt_sudo_password(data.sudo_password)
 
     await db.flush()
     return server

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import asyncssh
 
 from app.core.exceptions import RemoteExecutionError
-from app.core.security import decrypt_ssh_key
+from app.core.security import decrypt_ssh_key, decrypt_sudo_password
 from app.services.remote.base import ExecutionResult, _validate_binary
 
 if TYPE_CHECKING:
@@ -80,6 +80,13 @@ async def _create_connection(server: "Server") -> asyncssh.SSHClientConnection:
 class RemoteExecutor:
     def __init__(self, server: "Server") -> None:
         self._server = server
+        self._sudo_password: str | None = None
+        if server.sudo_password_encrypted_blob:
+            self._sudo_password = decrypt_sudo_password(server.sudo_password_encrypted_blob)
+
+    @property
+    def sudo_password(self) -> str | None:
+        return self._sudo_password
 
     async def run_command(
         self,

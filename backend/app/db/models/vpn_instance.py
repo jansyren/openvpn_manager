@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -27,6 +27,8 @@ class VpnInstance(Base, TimestampMixin):
     pam_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     tls_auth_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     easyrsa_use_sudo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    # AES-256-GCM encrypted CA passphrase (nonce prepended)
+    ca_passphrase_encrypted_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     server: Mapped["Server"] = relationship(  # noqa: F821
         "Server", foreign_keys=[server_id], back_populates="vpn_instances"

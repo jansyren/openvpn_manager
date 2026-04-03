@@ -83,3 +83,63 @@ class EasyRsaBuildServer(BaseModel):
         if not re.match(r"^[a-zA-Z0-9_\-\.]{1,64}$", v):
             raise ValueError("common_name contains invalid characters")
         return v
+
+
+# ── Server-level schemas (no VPN instance required) ─────────────────────
+
+
+class _ServerLevelBase(BaseModel):
+    easyrsa_path: str = Field("/usr/share/easy-rsa/easyrsa")
+    pki_dir: str = Field("/etc/easy-rsa/pki")
+    use_sudo: bool = False
+
+    @field_validator("easyrsa_path", "pki_dir")
+    @classmethod
+    def path_safe(cls, v: str) -> str:
+        if ".." in v:
+            raise ValueError("path must not contain '..'")
+        if not _SAFE_PATH_RE.match(v):
+            raise ValueError("path must be a valid absolute path")
+        return v
+
+
+class ServerPkiStatusRequest(_ServerLevelBase):
+    pass
+
+
+class ServerInitPki(_ServerLevelBase):
+    force: bool = False
+
+
+class ServerBuildCa(_ServerLevelBase):
+    passphrase: str = Field(..., min_length=4, max_length=128)
+    common_name: str = Field("Easy-RSA CA", max_length=64)
+    expire_days: int = Field(3650, ge=1, le=9999)
+
+
+class ServerBuildServerCert(_ServerLevelBase):
+    common_name: str = Field(..., min_length=1, max_length=64)
+    passphrase: str | None = None
+    expire_days: int = Field(3650, ge=1, le=9999)
+
+    @field_validator("common_name")
+    @classmethod
+    def cn_safe(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_\-\.]{1,64}$", v):
+            raise ValueError("common_name contains invalid characters")
+        return v
+
+
+class ServerGenDh(_ServerLevelBase):
+    pass
+
+
+class ServerRenewCa(_ServerLevelBase):
+    ca_passphrase: str = Field(..., min_length=1)
+    expire_days: int = Field(3650, ge=1, le=9999)
+
+
+class ServerCrossSign(_ServerLevelBase):
+    new_ca_csr_pem: str = Field(..., min_length=10)
+    old_ca_passphrase: str = Field(..., min_length=1)
+    expire_days: int = Field(365, ge=1, le=9999)

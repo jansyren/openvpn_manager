@@ -102,7 +102,13 @@ async def create_client(
             pass  # No cert found in PKI — client created without one
     else:
         # --- Certificate generation ---
-        if body.ca_passphrase:
+        # Resolve CA passphrase: use provided value or fall back to stored instance passphrase
+        ca_passphrase = body.ca_passphrase
+        if not ca_passphrase and instance.ca_passphrase_encrypted_blob:
+            from app.core.security import decrypt_ca_passphrase
+            ca_passphrase = decrypt_ca_passphrase(instance.ca_passphrase_encrypted_blob)
+
+        if ca_passphrase:
             easyrsa_executor, easyrsa_path = await _get_easyrsa_executor_and_path()
 
             await easyrsa_service.build_client_full(
@@ -110,7 +116,7 @@ async def create_client(
                 easyrsa_path,
                 pki_dir,
                 body.name,
-                body.ca_passphrase,
+                ca_passphrase,
                 body.cert_expire_days,
                 use_sudo=instance.easyrsa_use_sudo,
             )
@@ -135,10 +141,8 @@ async def create_client(
             db.add(cert_record)
             await db.flush()
 
-        # --- PAM user creation (always for user type; site-to-site is certificate only) ---
-        if body.client_type == "user":
-            if not body.pam_password:
-                raise ValidationError("pam_password is required for user clients")
+        # --- PAM user creation (only when pam_password is provided) ---
+        if body.client_type == "user" and body.pam_password:
             server = await get_server(db, instance.server_id)
             executor = get_executor(server)
             await pam_service.create_user(
@@ -286,38 +290,44 @@ async def revoke_client(
 
     client.is_revoked = True
 
-    if body.ca_passphrase:
-        inst_result = await db.execute(
-            select(VpnInstance).where(VpnInstance.id == client.vpn_instance_id)
-        )
-        instance = inst_result.scalar_one_or_none()
-        if instance:
-            pki_dir = _resolve_pki_dir(instance)
-            easyrsa_path = instance.easyrsa_path or easyrsa_service.DEFAULT_EASYRSA_PATH
-            easyrsa_server_id = (
-                instance.easyrsa_server_id
-                if instance.easyrsa_server_id is not None
-                else instance.server_id
-            )
-            easyrsa_server = await get_server(db, easyrsa_server_id)
-            executor = get_executor(easyrsa_server)
-            await easyrsa_service.revoke_cert(
-                executor, easyrsa_path, pki_dir, client.name, body.ca_passphrase,
-                use_sudo=instance.easyrsa_use_sudo,
-            )
+    inst_result = await db.execute(
+        select(VpnInstance).where(VpnInstance.id == client.vpn_instance_id)
+    )
+    instance = inst_result.scalar_one_or_none()
 
-            if client.cert_serial:
-                cert_result = await db.execute(
-                    select(Certificate).where(
-                        Certificate.vpn_instance_id == client.vpn_instance_id,
-                        Certificate.serial == client.cert_serial,
-                    )
+    # Resolve CA passphrase: use provided value or fall back to stored instance passphrase
+    ca_passphrase = body.ca_passphrase
+    if not ca_passphrase and instance and instance.ca_passphrase_encrypted_blob:
+        from app.core.security import decrypt_ca_passphrase
+        ca_passphrase = decrypt_ca_passphrase(instance.ca_passphrase_encrypted_blob)
+
+    if ca_passphrase and instance:
+        pki_dir = _resolve_pki_dir(instance)
+        easyrsa_path = instance.easyrsa_path or easyrsa_service.DEFAULT_EASYRSA_PATH
+        easyrsa_server_id = (
+            instance.easyrsa_server_id
+            if instance.easyrsa_server_id is not None
+            else instance.server_id
+        )
+        easyrsa_server = await get_server(db, easyrsa_server_id)
+        executor = get_executor(easyrsa_server)
+        await easyrsa_service.revoke_cert(
+            executor, easyrsa_path, pki_dir, client.name, ca_passphrase,
+            use_sudo=instance.easyrsa_use_sudo,
+        )
+
+        if client.cert_serial:
+            cert_result = await db.execute(
+                select(Certificate).where(
+                    Certificate.vpn_instance_id == client.vpn_instance_id,
+                    Certificate.serial == client.cert_serial,
                 )
-                cert = cert_result.scalar_one_or_none()
-                if cert:
-                    cert.is_revoked = True
-                    cert.revoked_at = datetime.now(UTC)
-                    cert.revoke_reason = "unspecified"
+            )
+            cert = cert_result.scalar_one_or_none()
+            if cert:
+                cert.is_revoked = True
+                cert.revoked_at = datetime.now(UTC)
+                cert.revoke_reason = "unspecified"
 
     await db.flush()
     return {"message": f"Client {client.name} revoked"}

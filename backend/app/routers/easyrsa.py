@@ -17,6 +17,13 @@ from app.schemas.easyrsa import (
     EasyRsaServerUpdate,
     EasyRsaSettings,
     EasyRsaSudoUpdate,
+    ServerBuildCa,
+    ServerBuildServerCert,
+    ServerCrossSign,
+    ServerGenDh,
+    ServerInitPki,
+    ServerPkiStatusRequest,
+    ServerRenewCa,
 )
 from app.services import easyrsa_service
 from app.services.server_service import get_executor, get_server
@@ -204,10 +211,17 @@ async def renew_ca(
     _: User = Depends(get_current_superuser),
 ) -> dict:
     """Renew the self-signed CA certificate (same key, new expiry). Uses OpenSSL."""
+    from app.core.security import decrypt_ca_passphrase
+
     instance = await _get_instance(vpn_instance_id, db)
     pki_dir = _resolve_pki_dir(instance)
     executor = await _get_easyrsa_executor(instance, db)
-    await easyrsa_service.renew_ca(executor, pki_dir, body.ca_passphrase, body.expire_days)
+
+    ca_passphrase = body.ca_passphrase
+    if not ca_passphrase and instance.ca_passphrase_encrypted_blob:
+        ca_passphrase = decrypt_ca_passphrase(instance.ca_passphrase_encrypted_blob)
+
+    await easyrsa_service.renew_ca(executor, pki_dir, ca_passphrase or "", body.expire_days)
     return {"message": f"CA certificate renewed for {body.expire_days} days", "pki_dir": pki_dir}
 
 
@@ -219,10 +233,131 @@ async def cross_sign(
     _: User = Depends(get_current_superuser),
 ) -> dict:
     """Cross-sign a new CA's CSR with this instance's old CA key."""
+    from app.core.security import decrypt_ca_passphrase
+
     instance = await _get_instance(vpn_instance_id, db)
     pki_dir = _resolve_pki_dir(instance)
     executor = await _get_easyrsa_executor(instance, db)
+
+    old_ca_passphrase = body.old_ca_passphrase
+    if not old_ca_passphrase and instance.ca_passphrase_encrypted_blob:
+        old_ca_passphrase = decrypt_ca_passphrase(instance.ca_passphrase_encrypted_blob)
+
     cross_cert_pem = await easyrsa_service.cross_sign_ca(
-        executor, pki_dir, body.new_ca_csr_pem, body.old_ca_passphrase, body.expire_days
+        executor, pki_dir, body.new_ca_csr_pem, old_ca_passphrase or "", body.expire_days
+    )
+    return {"message": "Cross-signed certificate generated", "cross_cert_pem": cross_cert_pem}
+
+
+# ── Server-level Easy-RSA routes (no VPN instance required) ─────────────
+
+
+@router.post("/server/{server_id}/pki-status")
+async def server_pki_status(
+    server_id: int,
+    body: ServerPkiStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    server = await get_server(db, server_id)
+    executor = get_executor(server)
+    status = await easyrsa_service.pki_status(executor, body.pki_dir)
+    return {
+        "easyrsa_path": body.easyrsa_path,
+        "pki_dir": body.pki_dir,
+        "use_sudo": body.use_sudo,
+        "pki_initialized": status["pki_initialized"],
+        "ca_built": status["ca_built"],
+        "permission_error": status.get("permission_error", False),
+        "error_detail": status.get("error_detail"),
+    }
+
+
+@router.post("/server/{server_id}/init-pki")
+async def server_init_pki(
+    server_id: int,
+    body: ServerInitPki,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> dict:
+    server = await get_server(db, server_id)
+    executor = get_executor(server)
+    output = await easyrsa_service.init_pki(
+        executor, body.easyrsa_path, body.pki_dir, body.force, use_sudo=body.use_sudo,
+    )
+    return {"message": "PKI initialised", "output": output}
+
+
+@router.post("/server/{server_id}/build-ca")
+async def server_build_ca(
+    server_id: int,
+    body: ServerBuildCa,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> dict:
+    server = await get_server(db, server_id)
+    executor = get_executor(server)
+    output = await easyrsa_service.build_ca(
+        executor, body.easyrsa_path, body.pki_dir, body.common_name, body.passphrase,
+        body.expire_days, use_sudo=body.use_sudo,
+    )
+    return {"message": "CA built successfully", "output": output}
+
+
+@router.post("/server/{server_id}/build-server")
+async def server_build_server(
+    server_id: int,
+    body: ServerBuildServerCert,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> dict:
+    server = await get_server(db, server_id)
+    executor = get_executor(server)
+    output = await easyrsa_service.build_server_full(
+        executor, body.easyrsa_path, body.pki_dir, body.common_name,
+        body.passphrase or "", body.expire_days, use_sudo=body.use_sudo,
+    )
+    return {"message": "Server certificate built", "output": output}
+
+
+@router.post("/server/{server_id}/gen-dh")
+async def server_gen_dh(
+    server_id: int,
+    body: ServerGenDh,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> dict:
+    server = await get_server(db, server_id)
+    executor = get_executor(server)
+    output = await easyrsa_service.gen_dh(
+        executor, body.easyrsa_path, body.pki_dir, use_sudo=body.use_sudo,
+    )
+    return {"message": "DH parameters generated", "output": output}
+
+
+@router.post("/server/{server_id}/renew-ca")
+async def server_renew_ca(
+    server_id: int,
+    body: ServerRenewCa,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> dict:
+    server = await get_server(db, server_id)
+    executor = get_executor(server)
+    await easyrsa_service.renew_ca(executor, body.pki_dir, body.ca_passphrase, body.expire_days)
+    return {"message": f"CA certificate renewed for {body.expire_days} days", "pki_dir": body.pki_dir}
+
+
+@router.post("/server/{server_id}/cross-sign")
+async def server_cross_sign(
+    server_id: int,
+    body: ServerCrossSign,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> dict:
+    server = await get_server(db, server_id)
+    executor = get_executor(server)
+    cross_cert_pem = await easyrsa_service.cross_sign_ca(
+        executor, body.pki_dir, body.new_ca_csr_pem, body.old_ca_passphrase, body.expire_days,
     )
     return {"message": "Cross-signed certificate generated", "cross_cert_pem": cross_cert_pem}

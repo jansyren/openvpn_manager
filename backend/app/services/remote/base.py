@@ -13,7 +13,9 @@ ALLOWED_BINARIES: frozenset[str] = frozenset(
     [
         "/usr/sbin/openvpn",
         "/usr/bin/easy-rsa",
+        "/usr/bin/easyrsa",
         "/usr/share/easy-rsa/easyrsa",
+        "/usr/local/bin/easyrsa",
         "/usr/local/share/easy-rsa/easyrsa",
         # systemctl
         "/bin/systemctl",
@@ -30,6 +32,8 @@ ALLOWED_BINARIES: frozenset[str] = frozenset(
         "/usr/bin/id",
         "/usr/bin/groups",
         "/usr/bin/getent",
+        "/usr/sbin/groupadd",
+        "/usr/sbin/groupdel",
         # file operations
         "/bin/cat",
         "/usr/bin/cat",
@@ -117,6 +121,26 @@ class Executor(Protocol):
     async def file_exists(self, path: str) -> bool: ...
 
     async def list_directory(self, path: str) -> list[str]: ...
+
+
+_SUDO = "/usr/bin/sudo"
+
+
+def prepare_sudo_command(
+    cmd: list[str],
+    sudo_password: str | None,
+    preserve_env: bool = False,
+) -> tuple[list[str], bytes | None]:
+    """Wrap a command with sudo and return (cmd, stdin_data).
+
+    If sudo_password is set, uses ``sudo -S`` (read password from stdin).
+    Otherwise uses ``sudo -n`` (non-interactive / NOPASSWD).
+    """
+    flags = ["-S"] if sudo_password else ["-n"]
+    if preserve_env:
+        flags.append("-E")
+    stdin_data = f"{sudo_password}\n".encode() if sudo_password else None
+    return [_SUDO, *flags, *cmd], stdin_data
 
 
 def _validate_binary(cmd: list[str]) -> None:

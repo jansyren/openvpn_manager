@@ -17,7 +17,7 @@ async def list_servers(
     _: User = Depends(get_current_user),
 ) -> list[ServerRead]:
     servers = await server_service.get_servers(db)
-    return [ServerRead.model_validate(s) for s in servers]
+    return [ServerRead.from_server(s) for s in servers]
 
 
 @router.post("", response_model=ServerRead, status_code=201)
@@ -27,7 +27,7 @@ async def create_server(
     _: User = Depends(get_current_superuser),
 ) -> ServerRead:
     server = await server_service.create_server(db, body)
-    return ServerRead.model_validate(server)
+    return ServerRead.from_server(server)
 
 
 @router.get("/{server_id}", response_model=ServerRead)
@@ -37,7 +37,7 @@ async def get_server(
     _: User = Depends(get_current_user),
 ) -> ServerRead:
     server = await server_service.get_server(db, server_id)
-    return ServerRead.model_validate(server)
+    return ServerRead.from_server(server)
 
 
 @router.put("/{server_id}", response_model=ServerRead)
@@ -48,7 +48,7 @@ async def update_server(
     _: User = Depends(get_current_superuser),
 ) -> ServerRead:
     server = await server_service.update_server(db, server_id, body)
-    return ServerRead.model_validate(server)
+    return ServerRead.from_server(server)
 
 
 @router.delete("/{server_id}", status_code=204)

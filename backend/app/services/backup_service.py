@@ -15,7 +15,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.core.exceptions import BackupError, ValidationError
 from app.core.security import compute_sha256
-from app.services.remote.base import Executor
+from app.services.remote.base import Executor, prepare_sudo_command
 
 
 async def create_backup(
@@ -42,21 +42,23 @@ async def create_backup(
     filename = f"{server_name}_{backup_type}_{timestamp}.tar.gz"
     tmp_archive = f"/tmp/ovpn_backup_{timestamp}.tar.gz"
 
+    sudo_pw = getattr(executor, "sudo_password", None)
+
     try:
         # Run tar via sudo so root-owned files (PKI keys etc.) are included.
-        # The SSH user must have NOPASSWD sudo for /bin/tar, /bin/chmod, /bin/rm.
-        result = await executor.run_command(
-            ["/usr/bin/sudo", "/bin/tar", "czf", tmp_archive, "--"] + source_paths,
-            timeout=120,
+        tar_cmd, stdin_data = prepare_sudo_command(
+            ["/bin/tar", "czf", tmp_archive, "--"] + source_paths, sudo_pw
         )
+        result = await executor.run_command(tar_cmd, timeout=120, stdin_data=stdin_data)
         if not result.success:
             raise BackupError(
                 f"tar failed (exit {result.returncode}): {result.stderr[:256]}"
             )
         # Make archive readable by the SSH user before SFTP retrieval
-        await executor.run_command(
-            ["/usr/bin/sudo", "/bin/chmod", "644", tmp_archive], timeout=10
+        chmod_cmd, stdin_data = prepare_sudo_command(
+            ["/bin/chmod", "644", tmp_archive], sudo_pw
         )
+        await executor.run_command(chmod_cmd, timeout=10, stdin_data=stdin_data)
         archive_bytes = await executor.read_file(tmp_archive)
     except BackupError:
         raise
@@ -64,9 +66,10 @@ async def create_backup(
         raise BackupError(f"Failed to create backup of {source_paths}: {exc}") from exc
     finally:
         try:
-            await executor.run_command(
-                ["/usr/bin/sudo", "/bin/rm", "-f", tmp_archive], timeout=10
+            rm_cmd, stdin_data = prepare_sudo_command(
+                ["/bin/rm", "-f", tmp_archive], sudo_pw
             )
+            await executor.run_command(rm_cmd, timeout=10, stdin_data=stdin_data)
         except Exception:
             pass
 

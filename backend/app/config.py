@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator, model_validator
+from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,14 +25,14 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
 
-    # Database
-    database_url: str = "sqlite+aiosqlite:///./openvpn_manager.db"
+    # Database (PostgreSQL required)
+    database_url: str
 
     # SSH key encryption
     ssh_key_encryption_secret: str
 
-    # CORS
-    cors_allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # CORS (comma-separated string in env)
+    cors_allowed_origins: str = "http://localhost:5173,http://localhost:3000"
 
     # Backup
     backup_storage_path: Path = Path("./backups")
@@ -46,17 +46,14 @@ class Settings(BaseSettings):
     max_failed_login_attempts: int = 5
     lockout_duration_minutes: int = 10
 
-    @field_validator("cors_allowed_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: object) -> list[str]:
-        if isinstance(v, list):
-            return [str(o).strip() for o in v]
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return []
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return list(v)  # type: ignore[call-overload]
+    # Initial admin (created on first startup if set)
+    app_admin_username: str | None = None
+    app_admin_password: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
 
     @model_validator(mode="after")
     def validate_secret_key_length(self) -> "Settings":

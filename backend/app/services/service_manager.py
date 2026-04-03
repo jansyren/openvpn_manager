@@ -30,17 +30,28 @@ def _service_name(instance_name: str) -> str:
 async def service_action(executor: Executor, instance_name: str, action: str) -> dict:
     """Run a systemctl action on an OpenVPN instance.
 
+    Uses sudo when a sudo password is configured on the executor (required when
+    the SSH user is not root). Falls back to a direct call when no password is
+    stored, which works for root sessions or NOPASSWD polkit setups.
+
     Returns a dict with 'returncode', 'stdout', 'stderr'.
     """
+    from app.services.remote.base import prepare_sudo_command
+
     allowed_actions = {"start", "stop", "restart", "reload", "enable", "disable", "status"}
     if action not in allowed_actions:
         raise ValidationError(f"Invalid service action: {action!r}")
 
     service = _service_name(instance_name)
-    result = await executor.run_command(
-        [_systemctl_bin(executor), action, service],
-        timeout=30.0,
-    )
+    base_cmd = [_systemctl_bin(executor), action, service]
+
+    sudo_pw = getattr(executor, "sudo_password", None)
+    if sudo_pw is not None:
+        cmd, stdin_data = prepare_sudo_command(base_cmd, sudo_pw)
+    else:
+        cmd, stdin_data = base_cmd, None
+
+    result = await executor.run_command(cmd, timeout=30.0, stdin_data=stdin_data)
 
     # 'status' returns exit 3 when stopped — not an error
     if action == "status" or result.success:
@@ -67,11 +78,11 @@ async def get_service_status(executor: Executor, instance_name: str) -> dict:
         line = line.strip()
         if line.startswith("Active:"):
             if "running" in line:
-                status = "running"
+                status = "active"
             elif "failed" in line:
                 status = "failed"
             elif "inactive" in line:
-                status = "stopped"
+                status = "inactive"
             elif "activating" in line:
                 status = "activating"
             # Extract since timestamp
@@ -88,13 +99,20 @@ async def get_service_status(executor: Executor, instance_name: str) -> dict:
 
 async def get_service_logs(executor: Executor, instance_name: str, lines: int = 100) -> str:
     """Return the last N lines of journald logs for this service."""
+    from app.services.remote.base import prepare_sudo_command
+
     if lines < 1 or lines > 10000:
         raise ValidationError("lines must be between 1 and 10000")
 
     service = _service_name(instance_name)
     journalctl = "/usr/bin/journalctl"
-    result = await executor.run_command(
-        [journalctl, "-u", service, "-n", str(lines), "--no-pager"],
-        timeout=15.0,
-    )
+    base_cmd = [journalctl, "-u", service, "-n", str(lines), "--no-pager"]
+
+    sudo_pw = getattr(executor, "sudo_password", None)
+    if sudo_pw is not None:
+        cmd, stdin_data = prepare_sudo_command(base_cmd, sudo_pw)
+    else:
+        cmd, stdin_data = base_cmd, None
+
+    result = await executor.run_command(cmd, timeout=15.0, stdin_data=stdin_data)
     return result.stdout

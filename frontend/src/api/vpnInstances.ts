@@ -33,13 +33,18 @@ export const vpnInstancesApi = {
     await apiClient.delete(`/vpn-instances/${id}`)
   },
 
-  async getConfig(id: number): Promise<{ directives: Record<string, unknown>; inline_blocks: string[] }> {
+  async getConfig(id: number): Promise<{ directives: Record<string, unknown>; inline_blocks: Record<string, string> }> {
     const response = await apiClient.get(`/vpn-instances/${id}/config`)
     return response.data
   },
 
-  async writeConfig(id: number, directives: Record<string, unknown>): Promise<void> {
-    await apiClient.put(`/vpn-instances/${id}/config`, { directives })
+  async writeConfig(id: number, data: { directives: Record<string, unknown>; inline_blocks?: Record<string, string>; validate?: boolean }): Promise<void> {
+    await apiClient.put(`/vpn-instances/${id}/config`, data)
+  },
+
+  async generateTlsKey(id: number): Promise<{ key: string }> {
+    const response = await apiClient.post<{ key: string }>(`/vpn-instances/${id}/generate-tls-key`)
+    return response.data
   },
 
   async serviceAction(id: number, action: ServiceAction): Promise<unknown> {
@@ -59,6 +64,28 @@ export const vpnInstancesApi = {
 
   async getDirectives(): Promise<DirectiveSpec[]> {
     const response = await apiClient.get<DirectiveSpec[]>('/vpn-instances/directives')
+    return response.data
+  },
+
+  async listPkiCerts(id: number): Promise<{ issued_certs: string[]; dh_exists: boolean }> {
+    const response = await apiClient.get(`/vpn-instances/${id}/pki-certs`)
+    return response.data
+  },
+
+  async installCert(id: number, commonName: string): Promise<{ cert_path: string; key_path: string; ca_path: string }> {
+    const response = await apiClient.post(`/vpn-instances/${id}/install-cert`, { common_name: commonName })
+    return response.data
+  },
+
+  async installDh(id: number): Promise<{ dh_path: string }> {
+    const response = await apiClient.post(`/vpn-instances/${id}/install-dh`)
+    return response.data
+  },
+
+  async setCaPassphrase(id: number, passphrase: string | null): Promise<VpnInstanceRead> {
+    const response = await apiClient.put<VpnInstanceRead>(`/vpn-instances/${id}/ca-passphrase`, {
+      ca_passphrase: passphrase,
+    })
     return response.data
   },
 }

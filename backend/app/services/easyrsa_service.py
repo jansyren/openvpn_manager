@@ -9,24 +9,50 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 
 from app.core.exceptions import RemoteExecutionError, ValidationError
-from app.services.remote.base import Executor
+from app.services.remote.base import Executor, prepare_sudo_command
 
 _SAFE_CN_RE = re.compile(r"^[a-zA-Z0-9_\-\.]{1,64}$")
+# CA common names may contain spaces (passed via --req-cn, not used as filenames)
+_SAFE_CA_CN_RE = re.compile(r"^[a-zA-Z0-9 _\-\.]{1,64}$")
 
 # Default easy-rsa binary location (can be overridden per VPN instance)
 DEFAULT_EASYRSA_PATH = "/usr/share/easy-rsa/easyrsa"
 
-_SUDO = "/usr/bin/sudo"
+
+def _easyrsa(easyrsa_path: str, pki_dir: str, *args: str) -> list[str]:
+    """Build an easy-rsa command with --pki-dir set explicitly.
+
+    Passing --pki-dir as a CLI argument is more reliable than relying on the
+    EASYRSA_PKI environment variable, which can be lost when commands are
+    run through sudo or non-login SSH shells.
+    """
+    return [easyrsa_path, f"--pki-dir={pki_dir}", *args]
 
 
-def _maybe_sudo(cmd: list[str], use_sudo: bool) -> list[str]:
-    """Prepend sudo -En if use_sudo is True. -E preserves env vars (EASYRSA_PKI), -n is non-interactive."""
-    return [_SUDO, "-En"] + cmd if use_sudo else cmd
+def _sudo_wrap(
+    executor: Executor,
+    cmd: list[str],
+    use_sudo: bool,
+    app_stdin: bytes | None = None,
+) -> tuple[list[str], bytes | None]:
+    """Wrap cmd with sudo if needed, combining sudo password + app stdin."""
+    if not use_sudo:
+        return cmd, app_stdin
+    sudo_pw = getattr(executor, "sudo_password", None)
+    cmd, sudo_stdin = prepare_sudo_command(cmd, sudo_pw, preserve_env=True)
+    if sudo_stdin and app_stdin:
+        return cmd, sudo_stdin + app_stdin
+    return cmd, sudo_stdin or app_stdin
 
 
 def _validate_cn(cn: str) -> None:
     if not _SAFE_CN_RE.match(cn):
         raise ValidationError(f"Invalid common name: {cn!r}")
+
+
+def _validate_ca_cn(cn: str) -> None:
+    if not _SAFE_CA_CN_RE.match(cn):
+        raise ValidationError(f"Invalid CA common name: {cn!r}")
 
 
 def _validate_path(path: str) -> None:
@@ -40,12 +66,14 @@ async def init_pki(executor: Executor, easyrsa_path: str, pki_dir: str, force: b
     _validate_path(easyrsa_path)
     _validate_path(pki_dir)
 
-    cmd = _maybe_sudo([easyrsa_path, "init-pki"], use_sudo)
     if force:
-        cmd = _maybe_sudo([easyrsa_path, "--batch", "init-pki"], use_sudo)
-
-    env_input = "yes\n".encode() if force else None
-    result = await executor.run_command(cmd, timeout=30.0, stdin_data=env_input, env={"EASYRSA_PKI": pki_dir})
+        base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", "init-pki")
+        app_stdin = "yes\n".encode()
+    else:
+        base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", "init-pki")
+        app_stdin = None
+    cmd, stdin_data = _sudo_wrap(executor, base_cmd, use_sudo, app_stdin)
+    result = await executor.run_command(cmd, timeout=30.0, stdin_data=stdin_data)
     result.raise_on_error("easy-rsa init-pki")
     return result.stdout
 
@@ -61,11 +89,12 @@ async def build_ca(
 ) -> str:
     _validate_path(easyrsa_path)
     _validate_path(pki_dir)
-    _validate_cn(common_name)
+    _validate_ca_cn(common_name)
 
-    cmd = _maybe_sudo([easyrsa_path, "--batch", f"--days={expire_days}", "build-ca"], use_sudo)
-    stdin_data = f"{common_name}\n{passphrase}\n{passphrase}\n".encode()
-    result = await executor.run_command(cmd, timeout=120.0, stdin_data=stdin_data, env={"EASYRSA_PKI": pki_dir})
+    base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", f"--days={expire_days}", f"--req-cn={common_name}", "build-ca")
+    app_stdin = f"{passphrase}\n{passphrase}\n".encode()
+    cmd, stdin_data = _sudo_wrap(executor, base_cmd, use_sudo, app_stdin)
+    result = await executor.run_command(cmd, timeout=120.0, stdin_data=stdin_data)
     result.raise_on_error("easy-rsa build-ca")
     return result.stdout
 
@@ -83,9 +112,10 @@ async def build_server_full(
     _validate_path(pki_dir)
     _validate_cn(common_name)
 
-    cmd = _maybe_sudo([easyrsa_path, "--batch", f"--days={expire_days}", "build-server-full", common_name, "nopass"], use_sudo)
-    stdin_data = f"{ca_passphrase}\n".encode()
-    result = await executor.run_command(cmd, timeout=180.0, stdin_data=stdin_data, env={"EASYRSA_PKI": pki_dir})
+    base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", f"--days={expire_days}", "build-server-full", common_name, "nopass")
+    app_stdin = f"{ca_passphrase}\n".encode()
+    cmd, stdin_data = _sudo_wrap(executor, base_cmd, use_sudo, app_stdin)
+    result = await executor.run_command(cmd, timeout=180.0, stdin_data=stdin_data)
     result.raise_on_error(f"easy-rsa build-server-full {common_name}")
     return result.stdout
 
@@ -103,9 +133,10 @@ async def build_client_full(
     _validate_path(pki_dir)
     _validate_cn(common_name)
 
-    cmd = _maybe_sudo([easyrsa_path, "--batch", f"--days={expire_days}", "build-client-full", common_name, "nopass"], use_sudo)
-    stdin_data = f"{ca_passphrase}\n".encode()
-    result = await executor.run_command(cmd, timeout=120.0, stdin_data=stdin_data, env={"EASYRSA_PKI": pki_dir})
+    base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", f"--days={expire_days}", "build-client-full", common_name, "nopass")
+    app_stdin = f"{ca_passphrase}\n".encode()
+    cmd, stdin_data = _sudo_wrap(executor, base_cmd, use_sudo, app_stdin)
+    result = await executor.run_command(cmd, timeout=120.0, stdin_data=stdin_data)
     result.raise_on_error(f"easy-rsa build-client-full {common_name}")
     return result.stdout
 
@@ -122,9 +153,10 @@ async def revoke_cert(
     _validate_path(easyrsa_path)
     _validate_cn(common_name)
 
-    cmd = _maybe_sudo([easyrsa_path, "--batch", f"--reason={reason}", "revoke", common_name], use_sudo)
-    stdin_data = f"yes\n{ca_passphrase}\n".encode()
-    result = await executor.run_command(cmd, timeout=30.0, stdin_data=stdin_data, env={"EASYRSA_PKI": pki_dir})
+    base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", f"--reason={reason}", "revoke", common_name)
+    app_stdin = f"yes\n{ca_passphrase}\n".encode()
+    cmd, stdin_data = _sudo_wrap(executor, base_cmd, use_sudo, app_stdin)
+    result = await executor.run_command(cmd, timeout=30.0, stdin_data=stdin_data)
     result.raise_on_error(f"easy-rsa revoke {common_name}")
 
     await gen_crl(executor, easyrsa_path, pki_dir, ca_passphrase, use_sudo=use_sudo)
@@ -140,9 +172,10 @@ async def gen_crl(
 ) -> str:
     _validate_path(easyrsa_path)
 
-    cmd = _maybe_sudo([easyrsa_path, "--batch", "gen-crl"], use_sudo)
-    stdin_data = f"{ca_passphrase}\n".encode()
-    result = await executor.run_command(cmd, timeout=30.0, stdin_data=stdin_data, env={"EASYRSA_PKI": pki_dir})
+    base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", "gen-crl")
+    app_stdin = f"{ca_passphrase}\n".encode()
+    cmd, stdin_data = _sudo_wrap(executor, base_cmd, use_sudo, app_stdin)
+    result = await executor.run_command(cmd, timeout=30.0, stdin_data=stdin_data)
     result.raise_on_error("easy-rsa gen-crl")
     return result.stdout
 
@@ -150,8 +183,8 @@ async def gen_crl(
 async def gen_dh(executor: Executor, easyrsa_path: str, pki_dir: str, use_sudo: bool = False) -> str:
     _validate_path(easyrsa_path)
 
-    cmd = _maybe_sudo([easyrsa_path, "gen-dh"], use_sudo)
-    result = await executor.run_command(cmd, timeout=600.0, env={"EASYRSA_PKI": pki_dir})
+    cmd, stdin_data = _sudo_wrap(executor, _easyrsa(easyrsa_path, pki_dir, "gen-dh"), use_sudo)
+    result = await executor.run_command(cmd, timeout=600.0, stdin_data=stdin_data)
     result.raise_on_error("easy-rsa gen-dh")
     return result.stdout
 
@@ -168,10 +201,9 @@ async def _read_file_maybe_sudo(executor: Executor, path: str, use_sudo: bool) -
     except Exception:
         if not use_sudo:
             raise
-        # Permission denied — retry via sudo cat (requires /bin/cat in sudoers)
-        result = await executor.run_command(
-            [_SUDO, "-n", "/bin/cat", path], timeout=10.0
-        )
+        # Permission denied — retry via sudo cat
+        cmd, stdin_data = _sudo_wrap(executor, ["/bin/cat", path], True)
+        result = await executor.run_command(cmd, timeout=10.0, stdin_data=stdin_data)
         result.raise_on_error(f"read file {path}")
         return result.stdout.encode()
 
@@ -196,6 +228,27 @@ async def read_ca_cert(executor: Executor, pki_dir: str, use_sudo: bool = False)
     return await _read_file_maybe_sudo(executor, path, use_sudo)
 
 
+async def list_issued_certs(executor: Executor, pki_dir: str, use_sudo: bool = False) -> list[str]:
+    """Return sorted list of CN names (stems) from pki/issued/*.crt files."""
+    issued_dir = str(PurePosixPath(pki_dir) / "issued")
+    try:
+        files = await executor.list_directory(issued_dir)
+        return sorted(PurePosixPath(f).stem for f in files if f.endswith(".crt"))
+    except Exception:
+        if not use_sudo:
+            return []
+        sudo_pw = getattr(executor, "sudo_password", None)
+        cmd, stdin_data = prepare_sudo_command(["/bin/ls", issued_dir], sudo_pw)
+        result = await executor.run_command(cmd, timeout=10.0, stdin_data=stdin_data)
+        if result.success:
+            return sorted(
+                line.replace(".crt", "")
+                for line in result.stdout.strip().split("\n")
+                if line.endswith(".crt")
+            )
+        return []
+
+
 async def read_crl(executor: Executor, pki_dir: str) -> bytes:
     _validate_path(pki_dir)
     path = str(PurePosixPath(pki_dir) / "crl.pem")
@@ -205,16 +258,25 @@ async def read_crl(executor: Executor, pki_dir: str) -> bytes:
 async def pki_status(executor: Executor, pki_dir: str) -> dict:
     """Check if PKI is initialised and CA is built.
 
-    Returns permission_error=True (with a message) if the executor user cannot
-    read the PKI directory, rather than silently returning False for all flags.
+    Falls back to `sudo ls` when SFTP returns permission denied (common when
+    the PKI directory was created by root via sudo).
     """
     from app.core.exceptions import RemoteExecutionError
 
     async def _exists(path: str) -> bool:
-        return await executor.file_exists(path)
+        try:
+            return await executor.file_exists(path)
+        except RemoteExecutionError:
+            # SFTP permission denied (root-owned PKI dir) — retry via sudo ls.
+            # Works with both password-based sudo and NOPASSWD sudo.
+            sudo_pw = getattr(executor, "sudo_password", None)
+            cmd, stdin_data = prepare_sudo_command(["/bin/ls", path], sudo_pw)
+            result = await executor.run_command(cmd, timeout=5.0, stdin_data=stdin_data)
+            return result.success
 
     try:
-        pki_initialized = await _exists(str(PurePosixPath(pki_dir) / "serial"))
+        # init-pki creates the private/ subdirectory; serial is only created by build-ca
+        pki_initialized = await _exists(str(PurePosixPath(pki_dir) / "private"))
         ca_built = await _exists(str(PurePosixPath(pki_dir) / "ca.crt"))
         index_exists = await _exists(str(PurePosixPath(pki_dir) / "index.txt"))
     except RemoteExecutionError as exc:
@@ -271,9 +333,10 @@ async def renew_cert(
     _validate_path(pki_dir)
     _validate_cn(common_name)
 
-    cmd = _maybe_sudo([easyrsa_path, "--batch", f"--days={expire_days}", "renew", common_name, "nopass"], use_sudo)
-    stdin_data = f"{ca_passphrase}\n".encode()
-    result = await executor.run_command(cmd, timeout=120.0, stdin_data=stdin_data, env={"EASYRSA_PKI": pki_dir})
+    base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", f"--days={expire_days}", "renew", common_name, "nopass")
+    app_stdin = f"{ca_passphrase}\n".encode()
+    cmd, stdin_data = _sudo_wrap(executor, base_cmd, use_sudo, app_stdin)
+    result = await executor.run_command(cmd, timeout=120.0, stdin_data=stdin_data)
     result.raise_on_error(f"easy-rsa renew {common_name}")
     return result.stdout
 

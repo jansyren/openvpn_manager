@@ -166,5 +166,35 @@ def decrypt_ssh_key(blob: bytes) -> bytes:
     return aesgcm.decrypt(nonce, ciphertext, None)
 
 
+def encrypt_sudo_password(password: str) -> bytes:
+    key = _derive_ssh_encryption_key(label="sudo-password-encryption")
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, password.encode(), None)
+    return nonce + ciphertext
+
+
+def decrypt_sudo_password(blob: bytes) -> str:
+    key = _derive_ssh_encryption_key(label="sudo-password-encryption")
+    aesgcm = AESGCM(key)
+    nonce, ciphertext = blob[:12], blob[12:]
+    return aesgcm.decrypt(nonce, ciphertext, None).decode()
+
+
+def encrypt_ca_passphrase(passphrase: str) -> bytes:
+    key = _derive_ssh_encryption_key(label="ca-passphrase-encryption")
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, passphrase.encode(), None)
+    return nonce + ciphertext
+
+
+def decrypt_ca_passphrase(blob: bytes) -> str:
+    key = _derive_ssh_encryption_key(label="ca-passphrase-encryption")
+    aesgcm = AESGCM(key)
+    nonce, ciphertext = blob[:12], blob[12:]
+    return aesgcm.decrypt(nonce, ciphertext, None).decode()
+
+
 def compute_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()

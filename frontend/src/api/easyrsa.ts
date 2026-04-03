@@ -1,7 +1,14 @@
 import apiClient from './client'
 import type { EasyRsaSettings } from '@/types'
 
+interface ServerLevelParams {
+  easyrsa_path: string
+  pki_dir: string
+  use_sudo: boolean
+}
+
 export const easyrsaApi = {
+  // ── VPN instance-level endpoints ──────────────────────────────────────
   async getSettings(vpnInstanceId: number): Promise<EasyRsaSettings> {
     const response = await apiClient.get<EasyRsaSettings>(`/easyrsa/${vpnInstanceId}/settings`)
     return response.data
@@ -67,6 +74,54 @@ export const easyrsaApi = {
     data: { new_ca_csr_pem: string; old_ca_passphrase: string; expire_days?: number },
   ): Promise<{ message: string; cross_cert_pem: string }> {
     const response = await apiClient.post(`/easyrsa/${vpnInstanceId}/cross-sign`, data)
+    return response.data
+  },
+
+  // ── Server-level endpoints (no VPN instance required) ─────────────────
+  async serverPkiStatus(serverId: number, params: ServerLevelParams): Promise<EasyRsaSettings & { use_sudo: boolean }> {
+    const response = await apiClient.post(`/easyrsa/server/${serverId}/pki-status`, params)
+    return response.data
+  },
+
+  async serverInitPki(serverId: number, params: ServerLevelParams & { force?: boolean }): Promise<{ message: string; output: string }> {
+    const response = await apiClient.post(`/easyrsa/server/${serverId}/init-pki`, params)
+    return response.data
+  },
+
+  async serverBuildCa(
+    serverId: number,
+    params: ServerLevelParams & { common_name: string; passphrase: string; expire_days?: number },
+  ): Promise<{ message: string; output: string }> {
+    const response = await apiClient.post(`/easyrsa/server/${serverId}/build-ca`, params)
+    return response.data
+  },
+
+  async serverBuildServer(
+    serverId: number,
+    params: ServerLevelParams & { common_name: string; passphrase?: string; expire_days?: number },
+  ): Promise<{ message: string; output: string }> {
+    const response = await apiClient.post(`/easyrsa/server/${serverId}/build-server`, params)
+    return response.data
+  },
+
+  async serverGenDh(serverId: number, params: ServerLevelParams): Promise<{ message: string; output: string }> {
+    const response = await apiClient.post(`/easyrsa/server/${serverId}/gen-dh`, params)
+    return response.data
+  },
+
+  async serverRenewCa(
+    serverId: number,
+    params: ServerLevelParams & { ca_passphrase: string; expire_days?: number },
+  ): Promise<{ message: string }> {
+    const response = await apiClient.post(`/easyrsa/server/${serverId}/renew-ca`, params)
+    return response.data
+  },
+
+  async serverCrossSign(
+    serverId: number,
+    params: ServerLevelParams & { new_ca_csr_pem: string; old_ca_passphrase: string; expire_days?: number },
+  ): Promise<{ message: string; cross_cert_pem: string }> {
+    const response = await apiClient.post(`/easyrsa/server/${serverId}/cross-sign`, params)
     return response.data
   },
 }

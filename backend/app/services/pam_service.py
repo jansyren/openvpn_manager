@@ -7,18 +7,16 @@ They are written to the subprocess stdin pipe only.
 import re
 
 from app.core.exceptions import ValidationError
-from app.services.remote.base import Executor
+from app.services.remote.base import Executor, prepare_sudo_command
 
 _USERADD = "/usr/sbin/useradd"
 _USERMOD = "/usr/sbin/usermod"
 _USERDEL = "/usr/sbin/userdel"
 _PASSWD = "/usr/bin/passwd"
 _GETENT = "/usr/bin/getent"
-_SUDO = "/usr/bin/sudo"
-
-
-def _maybe_sudo(cmd: list[str], use_sudo: bool) -> list[str]:
-    return [_SUDO, "-n"] + cmd if use_sudo else cmd
+_GROUPADD = "/usr/sbin/groupadd"
+_GROUPDEL = "/usr/sbin/groupdel"
+_CHPASSWD = "/usr/sbin/chpasswd"
 
 _UNIX_USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_\-]{0,30}$")
 _GROUP_RE = _UNIX_USERNAME_RE
@@ -46,13 +44,19 @@ async def create_user(
         for g in groups:
             _validate_group(g)
 
+    sudo_pw = getattr(executor, "sudo_password", None)
+
     # -M: no home directory, -s nologin: no interactive login shell
     cmd = [_USERADD, "-M", "-s", "/usr/sbin/nologin"]
     if groups:
         cmd += ["--groups", ",".join(groups)]
     cmd.append(username)
 
-    result = await executor.run_command(_maybe_sudo(cmd, use_sudo), timeout=15.0)
+    if use_sudo:
+        cmd, stdin_data = prepare_sudo_command(cmd, sudo_pw)
+    else:
+        stdin_data = None
+    result = await executor.run_command(cmd, timeout=15.0, stdin_data=stdin_data)
     result.raise_on_error(f"useradd {username}")
 
     await _set_password(executor, username, password, use_sudo=use_sudo)
@@ -66,14 +70,17 @@ async def update_user(
     use_sudo: bool = False,
 ) -> None:
     _validate_username(username)
+    sudo_pw = getattr(executor, "sudo_password", None)
 
     if groups is not None:
         for g in groups:
             _validate_group(g)
-        result = await executor.run_command(
-            _maybe_sudo([_USERMOD, "-G", ",".join(groups), username], use_sudo),
-            timeout=15.0,
-        )
+        cmd = [_USERMOD, "-G", ",".join(groups), username]
+        if use_sudo:
+            cmd, stdin_data = prepare_sudo_command(cmd, sudo_pw)
+        else:
+            stdin_data = None
+        result = await executor.run_command(cmd, timeout=15.0, stdin_data=stdin_data)
         result.raise_on_error(f"usermod {username}")
 
     if password is not None:
@@ -82,11 +89,16 @@ async def update_user(
 
 async def delete_user(executor: Executor, username: str, remove_home: bool = False, use_sudo: bool = False) -> None:
     _validate_username(username)
+    sudo_pw = getattr(executor, "sudo_password", None)
     cmd = [_USERDEL]
     if remove_home:
         cmd.append("--remove")
     cmd.append(username)
-    result = await executor.run_command(_maybe_sudo(cmd, use_sudo), timeout=15.0)
+    if use_sudo:
+        cmd, stdin_data = prepare_sudo_command(cmd, sudo_pw)
+    else:
+        stdin_data = None
+    result = await executor.run_command(cmd, timeout=15.0, stdin_data=stdin_data)
     result.raise_on_error(f"userdel {username}")
 
 
@@ -117,22 +129,124 @@ async def list_groups(executor: Executor) -> list[dict]:
     return groups
 
 
+async def create_group(
+    executor: Executor,
+    name: str,
+    gid: int | None = None,
+    use_sudo: bool = False,
+) -> None:
+    _validate_group(name)
+    sudo_pw = getattr(executor, "sudo_password", None)
+    cmd = [_GROUPADD]
+    if gid is not None:
+        cmd += ["--gid", str(gid)]
+    cmd.append(name)
+    if use_sudo:
+        cmd, stdin_data = prepare_sudo_command(cmd, sudo_pw)
+    else:
+        stdin_data = None
+    result = await executor.run_command(cmd, timeout=15.0, stdin_data=stdin_data)
+    result.raise_on_error(f"groupadd {name}")
+
+
+async def delete_group(executor: Executor, name: str, use_sudo: bool = False) -> None:
+    _validate_group(name)
+    sudo_pw = getattr(executor, "sudo_password", None)
+    cmd = [_GROUPDEL, name]
+    if use_sudo:
+        cmd, stdin_data = prepare_sudo_command(cmd, sudo_pw)
+    else:
+        stdin_data = None
+    result = await executor.run_command(cmd, timeout=15.0, stdin_data=stdin_data)
+    result.raise_on_error(f"groupdel {name}")
+
+
+async def get_user_shadow_hash(executor: Executor, username: str, use_sudo: bool = False) -> str | None:
+    """Return the shadow password hash for a user, or None if unavailable."""
+    _validate_username(username)
+    sudo_pw = getattr(executor, "sudo_password", None)
+    cmd = [_GETENT, "shadow", username]
+    if use_sudo:
+        cmd, stdin_data = prepare_sudo_command(cmd, sudo_pw)
+    else:
+        stdin_data = None
+    result = await executor.run_command(cmd, timeout=10.0, stdin_data=stdin_data)
+    if not result.success:
+        return None
+    parts = result.stdout.strip().split(":")
+    if len(parts) < 2:
+        return None
+    pw_hash = parts[1]
+    # Locked/disabled accounts have ! or * instead of a real hash
+    if not pw_hash or pw_hash in ("!", "*", "!!", "x"):
+        return None
+    return pw_hash
+
+
+async def create_user_with_hash(
+    executor: Executor,
+    username: str,
+    passwd_hash: str | None,
+    groups: list[str] | None = None,
+    use_sudo: bool = False,
+) -> None:
+    """Create a user using a pre-hashed password (for cross-server copy)."""
+    _validate_username(username)
+    if groups:
+        for g in groups:
+            _validate_group(g)
+
+    sudo_pw = getattr(executor, "sudo_password", None)
+
+    cmd = [_USERADD, "-M", "-s", "/usr/sbin/nologin"]
+    if groups:
+        cmd += ["--groups", ",".join(groups)]
+    cmd.append(username)
+
+    if use_sudo:
+        cmd, stdin_data = prepare_sudo_command(cmd, sudo_pw)
+    else:
+        stdin_data = None
+    result = await executor.run_command(cmd, timeout=15.0, stdin_data=stdin_data)
+    result.raise_on_error(f"useradd {username}")
+
+    if passwd_hash:
+        # chpasswd -e accepts pre-hashed passwords directly
+        user_stdin = f"{username}:{passwd_hash}\n".encode()
+        chpasswd_cmd: list[str] = [_CHPASSWD, "-e"]
+        if use_sudo:
+            chpasswd_cmd, sudo_stdin = prepare_sudo_command(chpasswd_cmd, sudo_pw)
+            stdin_data2 = (sudo_stdin or b"") + user_stdin
+        else:
+            stdin_data2 = user_stdin
+        result2 = await executor.run_command(chpasswd_cmd, timeout=10.0, stdin_data=stdin_data2)
+        result2.raise_on_error(f"chpasswd -e {username}")
+
+
 async def _set_password(executor: Executor, username: str, password: str, use_sudo: bool = False) -> None:
     """Set password via stdin — never via command-line argument."""
     _validate_username(username)
+    sudo_pw = getattr(executor, "sudo_password", None)
+
     # chpasswd reads "username:password" from stdin
-    stdin_data = f"{username}:{password}\n".encode()
-    result = await executor.run_command(
-        _maybe_sudo(["/usr/sbin/chpasswd"], use_sudo),
-        timeout=10.0,
-        stdin_data=stdin_data,
-    )
+    user_stdin = f"{username}:{password}\n".encode()
+    cmd: list[str] = ["/usr/sbin/chpasswd"]
+    if use_sudo:
+        cmd, sudo_stdin = prepare_sudo_command(cmd, sudo_pw)
+        # sudo -S reads its password first, then passes remaining stdin to child
+        stdin_data = (sudo_stdin or b"") + user_stdin
+    else:
+        stdin_data = user_stdin
+
+    result = await executor.run_command(cmd, timeout=10.0, stdin_data=stdin_data)
     if not result.success:
         # Fallback: passwd --stdin (RHEL/CentOS style)
-        stdin_data2 = f"{password}\n{password}\n".encode()
-        result2 = await executor.run_command(
-            _maybe_sudo([_PASSWD, "--stdin", username], use_sudo),
-            timeout=10.0,
-            stdin_data=stdin_data2,
-        )
+        user_stdin2 = f"{password}\n{password}\n".encode()
+        cmd2: list[str] = [_PASSWD, "--stdin", username]
+        if use_sudo:
+            cmd2, sudo_stdin2 = prepare_sudo_command(cmd2, sudo_pw)
+            stdin_data2 = (sudo_stdin2 or b"") + user_stdin2
+        else:
+            stdin_data2 = user_stdin2
+        result2 = await executor.run_command(cmd2, timeout=10.0, stdin_data=stdin_data2)
         result2.raise_on_error(f"setting password for {username}")

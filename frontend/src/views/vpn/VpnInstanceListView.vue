@@ -140,6 +140,14 @@
         <InputText v-model="form.dev" class="w-full" placeholder="tun0" />
       </div>
       <div class="field">
+        <label>Network</label>
+        <InputText v-model="form.network" class="w-full" placeholder="10.8.0.0" />
+      </div>
+      <div class="field">
+        <label>Netmask</label>
+        <InputText v-model="form.netmask" class="w-full" placeholder="255.255.255.0" />
+      </div>
+      <div class="field">
         <label>EasyRSA Path (optional)</label>
         <InputText v-model="form.easyrsa_path" class="w-full" placeholder="/etc/easyrsa" />
       </div>
@@ -218,6 +226,8 @@ const form = ref({
   proto: 'udp' as 'udp' | 'tcp',
   port: 1194,
   dev: 'tun0',
+  network: '10.8.0.0',
+  netmask: '255.255.255.0',
   easyrsa_path: '',
   easyrsa_server_id: null as number | null,
 })
@@ -258,7 +268,7 @@ async function loadInstances() {
 }
 
 function openAddDialog() {
-  form.value = { server_id: selectedServerId.value, name: '', config_path: '', proto: 'udp', port: 1194, dev: 'tun0', easyrsa_path: '', easyrsa_server_id: null }
+  form.value = { server_id: selectedServerId.value, name: '', config_path: '', proto: 'udp', port: 1194, dev: 'tun0', network: '10.8.0.0', netmask: '255.255.255.0', easyrsa_path: '', easyrsa_server_id: null }
   addDialogVisible.value = true
 }
 
@@ -278,7 +288,7 @@ async function discoverConfigs() {
 function importConfig(cfg: DiscoveredConfig) {
   discoverDialogVisible.value = false
   const name = cfg.name.replace(/\.conf$/, '').replace(/[^a-zA-Z0-9_-]/g, '-')
-  form.value = { server_id: selectedServerId.value, name, config_path: cfg.path, proto: 'udp', port: 1194, dev: 'tun0', easyrsa_path: '', easyrsa_server_id: null }
+  form.value = { server_id: selectedServerId.value, name, config_path: cfg.path, proto: 'udp', port: 1194, dev: 'tun0', network: '10.8.0.0', netmask: '255.255.255.0', easyrsa_path: '', easyrsa_server_id: null }
   addDialogVisible.value = true
 }
 
@@ -296,6 +306,8 @@ async function createInstance() {
       proto: form.value.proto,
       port: form.value.port,
       dev: form.value.dev,
+      network: form.value.network || undefined,
+      netmask: form.value.netmask || undefined,
       easyrsa_path: form.value.easyrsa_path || undefined,
       easyrsa_server_id: form.value.easyrsa_server_id ?? undefined,
     })

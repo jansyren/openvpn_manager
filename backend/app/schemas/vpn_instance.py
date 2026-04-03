@@ -60,6 +60,10 @@ class VpnInstanceUpdate(BaseModel):
     tls_auth_key: str | None = None
 
 
+class CaPassphraseUpdate(BaseModel):
+    ca_passphrase: str | None = Field(None, min_length=1, max_length=256)
+
+
 class VpnInstanceRead(BaseModel):
     id: int
     server_id: int
@@ -75,8 +79,15 @@ class VpnInstanceRead(BaseModel):
     easyrsa_server_id: int | None
     pam_enabled: bool
     tls_auth_key: str | None
+    has_ca_passphrase: bool = False
 
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):  # type: ignore[override]
+        data = super().model_validate(obj, **kwargs)
+        data.has_ca_passphrase = bool(getattr(obj, "ca_passphrase_encrypted_blob", None))
+        return data
 
 
 class VpnInstanceStatus(BaseModel):

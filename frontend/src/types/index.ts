@@ -89,6 +89,7 @@ export interface VpnInstanceRead {
   easyrsa_server_id: number | null
   pam_enabled: boolean
   tls_auth_key: string | null
+  has_ca_passphrase: boolean
 }
 
 export interface VpnInstanceCreate {
@@ -98,6 +99,8 @@ export interface VpnInstanceCreate {
   proto?: 'udp' | 'tcp'
   port?: number
   dev?: string
+  network?: string
+  netmask?: string
   easyrsa_path?: string
   easyrsa_server_id?: number
   pam_enabled?: boolean
@@ -122,6 +125,7 @@ export interface DirectiveSpec {
   example: string | null
   deprecated: boolean
   category: string
+  mutually_exclusive_with: string[]
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────
@@ -210,6 +214,41 @@ export interface PamGroupRead {
   name: string
   gid: number | null
   members: string[]
+}
+
+export interface StoredPamUserRead {
+  id: number
+  server_id: number
+  username: string
+  groups: string[]
+  has_hash: boolean
+}
+
+export interface StoredPamGroupRead {
+  id: number
+  server_id: number
+  name: string
+  gid: number | null
+}
+
+export interface PamGroupCreate {
+  name: string
+  gid?: number | null
+}
+
+export interface PamCopyRequest {
+  source_server_id: number
+  target_server_id: number
+  include_groups: boolean
+}
+
+export interface PamCopyResult {
+  groups_created: number
+  groups_skipped: number
+  groups_failed: string[]
+  users_created: number
+  users_skipped: number
+  users_failed: string[]
 }
 
 // ── Backup ────────────────────────────────────────────────────────────────
