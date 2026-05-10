@@ -106,6 +106,20 @@ const router = createRouter({
           component: () => import('@/views/users/UserListView.vue'),
           meta: { requiresSuperuser: true },
         },
+        // LDAP / Active Directory
+        {
+          path: 'ldap',
+          name: 'ldap',
+          component: () => import('@/views/ldap/LdapSettingsView.vue'),
+          meta: { requiresSuperuser: true },
+        },
+        // My VPN (vpn_user portal)
+        {
+          path: 'my-vpn',
+          name: 'my-vpn',
+          component: () => import('@/views/myvpn/MyVpnView.vue'),
+          meta: { requiresVpnUser: true },
+        },
       ],
     },
     // Catch-all
@@ -129,6 +143,11 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresSuperuser && !authStore.isSuperuser) {
     return { name: 'dashboard' }
+  }
+
+  // vpn_user role is restricted to the my-vpn route only
+  if (authStore.isVpnUser && to.name !== 'my-vpn') {
+    return { name: 'my-vpn' }
   }
 
   return true

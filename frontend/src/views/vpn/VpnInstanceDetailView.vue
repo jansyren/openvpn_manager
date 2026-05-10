@@ -308,6 +308,93 @@
               <pre class="directives-box">{{ cnConfigDirectives }}</pre>
             </div>
           </div>
+
+          <Divider />
+          <h3 class="settings-heading">Active Directory / LDAP Authentication</h3>
+          <p class="settings-desc">
+            When enabled, OpenVPN will use a custom auth plugin to verify user credentials against
+            Active Directory. Configure AD settings in the <RouterLink :to="{ name: 'ldap' }">Active Directory</RouterLink> section first.
+          </p>
+
+          <div class="field field-inline" style="margin-bottom: 1rem">
+            <Checkbox v-model="settingsLdapEnabled" :binary="true" input-id="ldap-enabled" @change="saveSettings" />
+            <label for="ldap-enabled">Enable LDAP authentication on this instance</label>
+          </div>
+
+          <div v-if="settingsLdapEnabled" class="field">
+            <label>LDAP Configuration</label>
+            <Select
+              v-model="settingsLdapConfigId"
+              :options="ldapConfigOptions"
+              option-label="label"
+              option-value="value"
+              placeholder="Select LDAP configuration"
+              show-clear
+              style="width: 100%; max-width: 400px"
+              @change="saveSettings"
+            />
+            <small class="text-muted">Users in linked LDAP groups will be synced as VPN clients.</small>
+          </div>
+
+          <div v-if="settingsLdapEnabled && settingsLdapConfigId" class="ldap-section">
+            <h4 class="ldap-section-title">VPN User Groups</h4>
+            <p class="settings-desc">Groups whose members should receive VPN access on this instance.</p>
+            <DataTable :value="ldapGroups" size="small">
+              <template #empty>No groups linked yet.</template>
+              <Column field="group_dn" header="Group DN" />
+              <Column field="display_name" header="Display Name" />
+              <Column header="" style="width: 4rem">
+                <template #body="{ data }">
+                  <Button icon="pi pi-trash" severity="danger" text rounded size="small" @click="removeLdapGroup(data.id)" />
+                </template>
+              </Column>
+            </DataTable>
+            <div class="add-group-row">
+              <InputText v-model="newGroupDn" placeholder="CN=VPN-Users,OU=Groups,DC=example,DC=com" style="flex: 1" />
+              <InputText v-model="newGroupDisplayName" placeholder="Display name (optional)" style="width: 180px" />
+              <Button label="Add Group" icon="pi pi-plus" size="small" @click="addLdapGroup" />
+            </div>
+
+            <div class="ldap-actions">
+              <Button
+                label="Sync Users from AD"
+                icon="pi pi-refresh"
+                severity="info"
+                :loading="ldapSyncing"
+                @click="syncLdapUsers"
+              />
+              <Button
+                label="Deploy Auth Plugin"
+                icon="pi pi-upload"
+                severity="secondary"
+                :loading="ldapDeploying"
+                @click="deployLdapPlugin"
+              />
+            </div>
+
+            <div v-if="ldapSyncResult" class="sync-result">
+              <Message severity="success" :closable="false">
+                Sync complete — {{ ldapSyncResult.users_created }} users created,
+                {{ ldapSyncResult.clients_created }} clients added,
+                {{ ldapSyncResult.certs_issued }} certificates issued,
+                {{ ldapSyncResult.skipped }} skipped.
+              </Message>
+              <div v-if="ldapSyncResult.failed.length > 0" class="failed-list">
+                <strong>Failed:</strong>
+                <ul>
+                  <li v-for="f in ldapSyncResult.failed" :key="f">{{ f }}</li>
+                </ul>
+              </div>
+            </div>
+
+            <div v-if="ldapDeployResult" class="deploy-result">
+              <Message severity="success" :closable="false">
+                Plugin deployed to <code>{{ ldapDeployResult.script_path }}</code>
+              </Message>
+              <p class="settings-desc" style="margin-top: 0.75rem">Add these directives to the server config:</p>
+              <pre class="directives-box">{{ ldapDeployResult.config_directives }}</pre>
+            </div>
+          </div>
         </div>
       </TabPanel>
 
@@ -341,7 +428,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
@@ -353,8 +440,11 @@ import Textarea from 'primevue/textarea'
 import InputText from 'primevue/inputtext'
 import Divider from 'primevue/divider'
 import Message from 'primevue/message'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
 import { vpnInstancesApi } from '@/api/vpnInstances'
-import type { VpnInstanceRead, VpnInstanceStatus, ServiceAction, DirectiveSpec } from '@/types'
+import { ldapApi } from '@/api/ldap'
+import type { VpnInstanceRead, VpnInstanceStatus, ServiceAction, DirectiveSpec, VpnInstanceLdapGroupRead, LdapConfigRead, LdapSyncResult, LdapDeployResult } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -400,6 +490,22 @@ const installDhLoading = ref(false)
 
 const pkiCertOptions = computed(() =>
   pkiCerts.value.map((cn) => ({ label: cn, value: cn }))
+)
+
+// LDAP settings state
+const settingsLdapEnabled = ref(false)
+const settingsLdapConfigId = ref<number | null>(null)
+const ldapConfigs = ref<LdapConfigRead[]>([])
+const ldapGroups = ref<VpnInstanceLdapGroupRead[]>([])
+const newGroupDn = ref('')
+const newGroupDisplayName = ref('')
+const ldapSyncing = ref(false)
+const ldapDeploying = ref(false)
+const ldapSyncResult = ref<LdapSyncResult | null>(null)
+const ldapDeployResult = ref<LdapDeployResult | null>(null)
+
+const ldapConfigOptions = computed(() =>
+  ldapConfigs.value.map((c) => ({ label: c.name, value: c.id }))
 )
 
 // Directive catalog and form state
@@ -496,6 +602,8 @@ async function loadInstance() {
     settingsPamEnabled.value = instance.value.pam_enabled
     settingsEnforceCn.value = instance.value.enforce_cn_username
     settingsTlsAuthKey.value = instance.value.tls_auth_key ?? ''
+    settingsLdapEnabled.value = instance.value.ldap_auth_enabled
+    settingsLdapConfigId.value = instance.value.ldap_config_id
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load instance', life: 4000 })
   }
@@ -649,6 +757,8 @@ async function saveSettings() {
       pam_enabled: settingsPamEnabled.value,
       enforce_cn_username: settingsEnforceCn.value,
       tls_auth_key: settingsTlsAuthKey.value || null,
+      ldap_auth_enabled: settingsLdapEnabled.value,
+      ldap_config_id: settingsLdapConfigId.value,
     })
     toast.add({ severity: 'success', summary: 'Saved', detail: 'Settings updated.', life: 3000 })
   } catch (e) {
@@ -697,6 +807,71 @@ async function loadStatus() {
   }
 }
 
+async function loadLdapData() {
+  try {
+    const [cfgs, grps] = await Promise.all([
+      ldapApi.listConfigs(),
+      ldapApi.listVpnGroups(instanceId),
+    ])
+    ldapConfigs.value = cfgs
+    ldapGroups.value = grps
+  } catch {
+    // LDAP may not be configured — silently ignore
+  }
+}
+
+async function addLdapGroup() {
+  if (!newGroupDn.value.trim() || !settingsLdapConfigId.value) return
+  try {
+    await ldapApi.addVpnGroup(instanceId, {
+      ldap_config_id: settingsLdapConfigId.value,
+      group_dn: newGroupDn.value.trim(),
+      display_name: newGroupDisplayName.value.trim() || undefined,
+    })
+    newGroupDn.value = ''
+    newGroupDisplayName.value = ''
+    ldapGroups.value = await ldapApi.listVpnGroups(instanceId)
+    toast.add({ severity: 'success', summary: 'Added', detail: 'Group linked.', life: 3000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to add group', life: 4000 })
+  }
+}
+
+async function removeLdapGroup(groupId: number) {
+  try {
+    await ldapApi.removeVpnGroup(instanceId, groupId)
+    ldapGroups.value = await ldapApi.listVpnGroups(instanceId)
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to remove group', life: 4000 })
+  }
+}
+
+async function syncLdapUsers() {
+  ldapSyncing.value = true
+  ldapSyncResult.value = null
+  try {
+    ldapSyncResult.value = await ldapApi.syncLdapUsers(instanceId)
+    toast.add({ severity: 'success', summary: 'Synced', detail: `${ldapSyncResult.value.clients_created} clients added.`, life: 4000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Sync failed', life: 4000 })
+  } finally {
+    ldapSyncing.value = false
+  }
+}
+
+async function deployLdapPlugin() {
+  ldapDeploying.value = true
+  ldapDeployResult.value = null
+  try {
+    ldapDeployResult.value = await ldapApi.deployLdapPlugin(instanceId)
+    toast.add({ severity: 'success', summary: 'Deployed', detail: 'LDAP auth plugin deployed.', life: 4000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Deploy failed', life: 4000 })
+  } finally {
+    ldapDeploying.value = false
+  }
+}
+
 async function runAction(action: ServiceAction) {
   actionLoading.value = action
   try {
@@ -712,7 +887,7 @@ async function runAction(action: ServiceAction) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadInstance(), loadDirectives()])
+  await Promise.all([loadInstance(), loadDirectives(), loadLdapData()])
   await Promise.all([loadLogs(), loadConfig(), loadStatus()])
 })
 </script>
@@ -966,5 +1141,40 @@ onMounted(async () => {
   line-height: 1.6;
   white-space: pre;
   margin: 0;
+}
+.ldap-section {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.ldap-section-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.add-group-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ldap-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.sync-result,
+.deploy-result {
+  margin-top: 0.25rem;
+}
+.failed-list {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--p-red-500);
+}
+.failed-list ul {
+  margin: 0.25rem 0 0 1rem;
+  padding: 0;
 }
 </style>

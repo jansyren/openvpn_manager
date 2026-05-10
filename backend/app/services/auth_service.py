@@ -26,7 +26,20 @@ async def authenticate(db: AsyncSession, username: str, password: str) -> User:
     result = await db.execute(select(User).where(User.username == username))
     user: User | None = result.scalar_one_or_none()
 
-    if user is None or not verify_password(password, user.hashed_password):
+    if user is not None and user.auth_source == "ldap":
+        return await _authenticate_ldap_user(db, user, password)
+
+    if user is None:
+        # Try JIT provisioning via any active LDAP config
+        ldap_user = await _try_ldap_jit(db, username, password)
+        if ldap_user:
+            return ldap_user
+        locked = record_failed_login(username)
+        if locked:
+            raise AuthError("Account locked due to too many failed login attempts")
+        raise AuthError("Invalid username or password")
+
+    if not verify_password(password, user.hashed_password):
         locked = record_failed_login(username)
         if locked:
             raise AuthError("Account locked due to too many failed login attempts")
@@ -39,6 +52,91 @@ async def authenticate(db: AsyncSession, username: str, password: str) -> User:
     user.last_login = datetime.now(UTC)
     await db.flush()
     return user
+
+
+async def _authenticate_ldap_user(db: AsyncSession, user: User, password: str) -> User:
+    """Verify an existing LDAP user's password via directory bind."""
+    from app.db.models.ldap_config import LdapConfig
+    from app.services import ldap_service
+
+    if not user.is_active:
+        raise ForbiddenError("Account is disabled")
+
+    ldap_cfg: LdapConfig | None = None
+    if user.ldap_config_id:
+        result = await db.execute(select(LdapConfig).where(LdapConfig.id == user.ldap_config_id))
+        ldap_cfg = result.scalar_one_or_none()
+
+    if ldap_cfg is None:
+        # Fall back to trying all active configs
+        result = await db.execute(select(LdapConfig).where(LdapConfig.is_active == True))  # noqa: E712
+        configs = result.scalars().all()
+        for cfg in configs:
+            try:
+                await ldap_service.authenticate_user(cfg, user.username, password)
+                ldap_cfg = cfg
+                break
+            except Exception:
+                continue
+        if ldap_cfg is None:
+            locked = record_failed_login(user.username)
+            if locked:
+                raise AuthError("Account locked due to too many failed login attempts")
+            raise AuthError("Invalid username or password")
+    else:
+        try:
+            await ldap_service.authenticate_user(ldap_cfg, user.username, password)
+        except Exception:
+            locked = record_failed_login(user.username)
+            if locked:
+                raise AuthError("Account locked due to too many failed login attempts")
+            raise AuthError("Invalid username or password")
+
+    clear_failed_logins(user.username)
+    user.last_login = datetime.now(UTC)
+    await db.flush()
+    return user
+
+
+async def _try_ldap_jit(db: AsyncSession, username: str, password: str) -> User | None:
+    """Attempt LDAP authentication and JIT-create a User if successful."""
+    from app.db.models.ldap_config import LdapConfig
+    from app.db.models.ldap_group_mapping import LdapGroupRoleMapping
+    from app.services import ldap_service
+
+    result = await db.execute(select(LdapConfig).where(LdapConfig.is_active == True))  # noqa: E712
+    configs = result.scalars().all()
+
+    for cfg in configs:
+        try:
+            user_dn, group_dns = await ldap_service.authenticate_user(cfg, username, password)
+        except Exception:
+            continue
+
+        # Determine role from group mappings
+        mapping_result = await db.execute(
+            select(LdapGroupRoleMapping).where(LdapGroupRoleMapping.ldap_config_id == cfg.id)
+        )
+        mappings = mapping_result.scalars().all()
+        role = ldap_service.determine_role(group_dns, list(mappings)) or "vpn_user"
+
+        user = User(
+            username=username,
+            hashed_password="!ldap",
+            auth_source="ldap",
+            ldap_dn=user_dn,
+            ldap_config_id=cfg.id,
+            role=role,
+            is_active=True,
+            is_superuser=False,
+            last_login=datetime.now(UTC),
+        )
+        db.add(user)
+        await db.flush()
+        clear_failed_logins(username)
+        return user
+
+    return None
 
 
 async def create_tokens(user: User) -> dict:

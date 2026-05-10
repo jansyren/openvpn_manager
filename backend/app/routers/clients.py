@@ -29,11 +29,14 @@ def _resolve_pki_dir(instance: VpnInstance) -> str:
 async def list_clients(
     vpn_instance_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[VpnClientRead]:
     query = select(VpnClient)
     if vpn_instance_id is not None:
         query = query.where(VpnClient.vpn_instance_id == vpn_instance_id)
+    # vpn_user role may only view their own clients
+    if current_user.role == "vpn_user":
+        query = query.where(VpnClient.name == current_user.username)
     result = await db.execute(query)
     return [VpnClientRead.model_validate(c) for c in result.scalars().all()]
 
@@ -212,7 +215,7 @@ async def delete_client(
 async def download_ovpn(
     client_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> Response:
     from app.core.exceptions import ForbiddenError, NotFoundError
 
@@ -220,6 +223,8 @@ async def download_ovpn(
     client = result.scalar_one_or_none()
     if client is None:
         raise NotFoundError(f"Client {client_id} not found")
+    if current_user.role == "vpn_user" and client.name != current_user.username:
+        raise ForbiddenError("Access denied")
     if client.is_revoked:
         raise ForbiddenError("Cannot download config for a revoked client")
 

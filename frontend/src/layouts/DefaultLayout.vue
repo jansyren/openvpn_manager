@@ -5,25 +5,35 @@
         <span class="logo">OpenVPN Manager</span>
       </div>
       <ul class="nav-menu">
-        <li><RouterLink :to="{ name: 'dashboard' }"><i class="pi pi-home" /> Dashboard</RouterLink></li>
-        <li><RouterLink :to="{ name: 'servers' }"><i class="pi pi-server" /> Servers</RouterLink></li>
-        <li><RouterLink :to="{ name: 'vpn-instances' }"><i class="pi pi-shield" /> VPN Instances</RouterLink></li>
-        <li><RouterLink :to="{ name: 'routes' }"><i class="pi pi-directions" /> Routes</RouterLink></li>
-        <li><RouterLink :to="{ name: 'clients' }"><i class="pi pi-users" /> Clients</RouterLink></li>
-        <li><RouterLink :to="{ name: 'certificates' }"><i class="pi pi-verified" /> Certificates</RouterLink></li>
-        <li v-if="authStore.isSuperuser">
-          <RouterLink :to="{ name: 'pam' }"><i class="pi pi-key" /> PAM Users</RouterLink>
-        </li>
-        <li v-if="authStore.isSuperuser">
-          <RouterLink :to="{ name: 'easyrsa' }"><i class="pi pi-lock" /> Easy-RSA</RouterLink>
-        </li>
-        <li><RouterLink :to="{ name: 'backup' }"><i class="pi pi-database" /> Backup</RouterLink></li>
-        <li v-if="authStore.isSuperuser">
-          <RouterLink :to="{ name: 'deploy' }"><i class="pi pi-cloud-upload" /> Deploy</RouterLink>
-        </li>
-        <li v-if="authStore.isSuperuser">
-          <RouterLink :to="{ name: 'users' }"><i class="pi pi-users" /> Users</RouterLink>
-        </li>
+        <!-- vpn_user sees only their VPN portal -->
+        <template v-if="authStore.isVpnUser">
+          <li><RouterLink :to="{ name: 'my-vpn' }"><i class="pi pi-download" /> My VPN Config</RouterLink></li>
+        </template>
+        <!-- all other roles see full nav -->
+        <template v-else>
+          <li><RouterLink :to="{ name: 'dashboard' }"><i class="pi pi-home" /> Dashboard</RouterLink></li>
+          <li><RouterLink :to="{ name: 'servers' }"><i class="pi pi-server" /> Servers</RouterLink></li>
+          <li><RouterLink :to="{ name: 'vpn-instances' }"><i class="pi pi-shield" /> VPN Instances</RouterLink></li>
+          <li><RouterLink :to="{ name: 'routes' }"><i class="pi pi-directions" /> Routes</RouterLink></li>
+          <li><RouterLink :to="{ name: 'clients' }"><i class="pi pi-users" /> Clients</RouterLink></li>
+          <li><RouterLink :to="{ name: 'certificates' }"><i class="pi pi-verified" /> Certificates</RouterLink></li>
+          <li v-if="authStore.isSuperuser">
+            <RouterLink :to="{ name: 'pam' }"><i class="pi pi-key" /> PAM Users</RouterLink>
+          </li>
+          <li v-if="authStore.isSuperuser">
+            <RouterLink :to="{ name: 'easyrsa' }"><i class="pi pi-lock" /> Easy-RSA</RouterLink>
+          </li>
+          <li><RouterLink :to="{ name: 'backup' }"><i class="pi pi-database" /> Backup</RouterLink></li>
+          <li v-if="authStore.isSuperuser">
+            <RouterLink :to="{ name: 'deploy' }"><i class="pi pi-cloud-upload" /> Deploy</RouterLink>
+          </li>
+          <li v-if="authStore.isSuperuser">
+            <RouterLink :to="{ name: 'users' }"><i class="pi pi-users" /> Users</RouterLink>
+          </li>
+          <li v-if="authStore.isSuperuser">
+            <RouterLink :to="{ name: 'ldap' }"><i class="pi pi-sitemap" /> Active Directory</RouterLink>
+          </li>
+        </template>
       </ul>
       <div class="sidebar-footer">
         <span class="username">{{ authStore.currentUser?.username }}</span>

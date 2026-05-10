@@ -12,6 +12,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!accessToken.value)
   const isSuperuser = computed(() => currentUser.value?.is_superuser ?? false)
+  const role = computed(() => currentUser.value?.role ?? null)
+  const isVpnUser = computed(() => currentUser.value?.role === 'vpn_user')
 
   async function login(username: string, password: string): Promise<void> {
     loading.value = true
@@ -57,6 +59,8 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     isAuthenticated,
     isSuperuser,
+    role,
+    isVpnUser,
     login,
     logout,
     tryRefresh,

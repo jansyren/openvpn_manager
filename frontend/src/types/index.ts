@@ -24,18 +24,24 @@ export interface UserManagementRead {
   role: string
   is_active: boolean
   is_superuser: boolean
+  auth_source: string
 }
+
+export type AppRole = 'admin' | 'operator' | 'viewer' | 'vpn_user'
+export type AuthSource = 'local' | 'ldap'
 
 export interface UserCreate {
   username: string
-  password: string
-  role: 'admin' | 'operator' | 'viewer'
+  password?: string
+  role: AppRole
   is_active?: boolean
+  auth_source?: AuthSource
+  ldap_config_id?: number
 }
 
 export interface UserUpdate {
   password?: string
-  role?: 'admin' | 'operator' | 'viewer'
+  role?: AppRole
   is_active?: boolean
 }
 
@@ -100,6 +106,8 @@ export interface VpnInstanceRead {
   enforce_cn_username: boolean
   tls_auth_key: string | null
   has_ca_passphrase: boolean
+  ldap_auth_enabled: boolean
+  ldap_config_id: number | null
 }
 
 export interface VpnInstanceCreate {
@@ -115,6 +123,15 @@ export interface VpnInstanceCreate {
   easyrsa_server_id?: number
   pam_enabled?: boolean
   import_existing?: boolean
+}
+
+export interface VpnInstanceUpdate {
+  pam_enabled?: boolean
+  enforce_cn_username?: boolean
+  tls_auth_key?: string | null
+  ldap_auth_enabled?: boolean
+  ldap_config_id?: number | null
+  ca_passphrase?: string | null
 }
 
 export interface VpnInstanceStatus {
@@ -297,6 +314,103 @@ export interface DeployTaskStatus {
   status: 'pending' | 'running' | 'completed' | 'failed'
   log_lines: string[]
   error: string | null
+}
+
+// ── LDAP ─────────────────────────────────────────────────────────────────
+export interface LdapConfigRead {
+  id: number
+  name: string
+  server_url: string
+  server_url_backup: string | null
+  bind_dn: string
+  user_search_base: string
+  user_filter: string
+  username_attr: string
+  group_search_base: string | null
+  group_member_attr: string
+  use_tls: boolean
+  tls_verify_cert: boolean
+  ca_cert_pem: string | null
+  is_active: boolean
+}
+
+export interface LdapConfigCreate {
+  name: string
+  server_url: string
+  server_url_backup?: string
+  bind_dn: string
+  bind_password: string
+  user_search_base: string
+  user_filter?: string
+  username_attr?: string
+  group_search_base?: string
+  group_member_attr?: string
+  use_tls?: boolean
+  tls_verify_cert?: boolean
+  ca_cert_pem?: string
+  is_active?: boolean
+}
+
+export interface LdapConfigUpdate {
+  name?: string
+  server_url?: string
+  server_url_backup?: string
+  bind_dn?: string
+  bind_password?: string
+  user_search_base?: string
+  user_filter?: string
+  username_attr?: string
+  group_search_base?: string
+  group_member_attr?: string
+  use_tls?: boolean
+  tls_verify_cert?: boolean
+  ca_cert_pem?: string
+  is_active?: boolean
+}
+
+export interface LdapGroupRoleMappingRead {
+  id: number
+  ldap_config_id: number
+  group_dn: string
+  role: AppRole
+}
+
+export interface LdapGroupRoleMappingCreate {
+  group_dn: string
+  role: AppRole
+}
+
+export interface VpnInstanceLdapGroupRead {
+  id: number
+  vpn_instance_id: number
+  ldap_config_id: number
+  group_dn: string
+  display_name: string | null
+}
+
+export interface VpnInstanceLdapGroupCreate {
+  ldap_config_id: number
+  group_dn: string
+  display_name?: string
+}
+
+export interface LdapTestResult {
+  success: boolean
+  message: string
+}
+
+export interface LdapSyncResult {
+  users_created: number
+  clients_created: number
+  certs_issued: number
+  skipped: number
+  failed: string[]
+}
+
+export interface LdapDeployResult {
+  script_path: string
+  config_path: string
+  config_directives: string
 }
 
 // ── System ────────────────────────────────────────────────────────────────

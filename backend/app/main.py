@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.core.exceptions import AppError, app_error_handler, http_exception_handler
 from app.core.logging import RequestLoggingMiddleware, configure_logging
 
-from app.routers import auth, backup, certificates, clients, deploy, easyrsa, pam, routes, servers, system, users, vpn_instances
+from app.routers import auth, backup, certificates, clients, deploy, easyrsa, ldap, pam, routes, servers, system, users, vpn_instances
 
 
 @asynccontextmanager
@@ -83,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(deploy.router, prefix=api_prefix)
     app.include_router(system.router, prefix=api_prefix)
     app.include_router(users.router, prefix=api_prefix)
+    app.include_router(ldap.router, prefix=api_prefix)
 
     # Health check at root (no auth required)
     @app.get("/health", include_in_schema=False)

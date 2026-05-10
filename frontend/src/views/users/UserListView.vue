@@ -10,6 +10,11 @@
     <DataTable :value="users" :loading="loading" striped-rows>
       <template #empty>No users found.</template>
       <Column field="username" header="Username" />
+      <Column header="Source">
+        <template #body="{ data }">
+          <Tag :value="data.auth_source === 'ldap' ? 'AD/LDAP' : 'Local'" :severity="data.auth_source === 'ldap' ? 'info' : 'secondary'" />
+        </template>
+      </Column>
       <Column header="Role">
         <template #body="{ data }">
           <Tag :value="data.role" :severity="roleSeverity(data.role)" />
@@ -49,14 +54,36 @@
     </DataTable>
 
     <!-- Add User Dialog -->
-    <Dialog v-model:visible="addDialogVisible" header="Add User" modal style="width: 420px">
+    <Dialog v-model:visible="addDialogVisible" header="Add User" modal style="width: 460px">
+      <div class="field">
+        <label>Auth Source *</label>
+        <Select
+          v-model="addForm.auth_source"
+          :options="authSourceOptions"
+          option-label="label"
+          option-value="value"
+          class="w-full"
+        />
+      </div>
       <div class="field">
         <label>Username *</label>
         <InputText v-model="addForm.username" class="w-full" placeholder="min 3 characters" />
       </div>
-      <div class="field">
+      <div v-if="addForm.auth_source === 'local'" class="field">
         <label>Password *</label>
         <InputText v-model="addForm.password" type="password" class="w-full" placeholder="min 8 characters" />
+      </div>
+      <div v-if="addForm.auth_source === 'ldap'" class="field">
+        <label>LDAP Config *</label>
+        <Select
+          v-model="addForm.ldap_config_id"
+          :options="ldapConfigOptions"
+          option-label="label"
+          option-value="value"
+          placeholder="Select LDAP configuration"
+          class="w-full"
+        />
+        <small class="text-muted">User will authenticate against this LDAP directory.</small>
       </div>
       <div class="field">
         <label>Role *</label>
@@ -80,8 +107,10 @@
 
     <!-- Edit User Dialog -->
     <Dialog v-model:visible="editDialogVisible" header="Edit User" modal style="width: 420px">
-      <p class="text-muted" style="margin-bottom: 1rem">Editing: <strong>{{ editTarget?.username }}</strong></p>
-      <div class="field">
+      <p class="text-muted" style="margin-bottom: 1rem">Editing: <strong>{{ editTarget?.username }}</strong>
+        <Tag v-if="editTarget?.auth_source === 'ldap'" value="AD/LDAP" severity="info" style="margin-left: 0.5rem" />
+      </p>
+      <div v-if="editTarget?.auth_source !== 'ldap'" class="field">
         <label>New Password (leave blank to keep current)</label>
         <InputText v-model="editForm.password" type="password" class="w-full" placeholder="min 8 characters" />
       </div>
@@ -122,8 +151,9 @@ import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import Checkbox from 'primevue/checkbox'
 import { usersApi } from '@/api/users'
+import { ldapApi } from '@/api/ldap'
 import { useAuthStore } from '@/stores/auth'
-import type { UserManagementRead } from '@/types'
+import type { UserManagementRead, AppRole, AuthSource, LdapConfigRead } from '@/types'
 
 const toast = useToast()
 const confirm = useConfirm()
@@ -131,6 +161,7 @@ const authStore = useAuthStore()
 const currentUser = authStore.currentUser
 
 const users = ref<UserManagementRead[]>([])
+const ldapConfigs = ref<LdapConfigRead[]>([])
 const loading = ref(false)
 const saving = ref(false)
 
@@ -141,25 +172,36 @@ const editTarget = ref<UserManagementRead | null>(null)
 const addForm = ref({
   username: '',
   password: '',
-  role: 'viewer' as 'admin' | 'operator' | 'viewer',
+  role: 'viewer' as AppRole,
   is_active: true,
+  auth_source: 'local' as AuthSource,
+  ldap_config_id: null as number | null,
 })
 
 const editForm = ref({
   password: '',
-  role: 'viewer' as 'admin' | 'operator' | 'viewer',
+  role: 'viewer' as AppRole,
   is_active: true,
 })
+
+const authSourceOptions = [
+  { label: 'Local', value: 'local' },
+  { label: 'AD / LDAP', value: 'ldap' },
+]
 
 const roleOptions = [
   { label: 'Admin', value: 'admin' },
   { label: 'Operator', value: 'operator' },
   { label: 'Viewer', value: 'viewer' },
+  { label: 'VPN User', value: 'vpn_user' },
 ]
+
+const ldapConfigOptions = ref<{ label: string; value: number }[]>([])
 
 function roleSeverity(role: string): string {
   if (role === 'admin') return 'danger'
   if (role === 'operator') return 'warn'
+  if (role === 'vpn_user') return 'success'
   return 'info'
 }
 
@@ -174,23 +216,42 @@ async function loadUsers() {
   }
 }
 
+async function loadLdapConfigs() {
+  try {
+    ldapConfigs.value = await ldapApi.listConfigs()
+    ldapConfigOptions.value = ldapConfigs.value.map((c) => ({ label: c.name, value: c.id }))
+  } catch {
+    // LDAP not configured — silently ignore
+  }
+}
+
 function openAddDialog() {
-  addForm.value = { username: '', password: '', role: 'viewer', is_active: true }
+  addForm.value = { username: '', password: '', role: 'viewer', is_active: true, auth_source: 'local', ldap_config_id: null }
   addDialogVisible.value = true
 }
 
 async function createUser() {
-  if (!addForm.value.username || !addForm.value.password) {
-    toast.add({ severity: 'warn', summary: 'Validation', detail: 'Username and password are required.', life: 3000 })
+  if (!addForm.value.username) {
+    toast.add({ severity: 'warn', summary: 'Validation', detail: 'Username is required.', life: 3000 })
+    return
+  }
+  if (addForm.value.auth_source === 'local' && !addForm.value.password) {
+    toast.add({ severity: 'warn', summary: 'Validation', detail: 'Password is required for local users.', life: 3000 })
+    return
+  }
+  if (addForm.value.auth_source === 'ldap' && !addForm.value.ldap_config_id) {
+    toast.add({ severity: 'warn', summary: 'Validation', detail: 'LDAP configuration is required.', life: 3000 })
     return
   }
   saving.value = true
   try {
     await usersApi.create({
       username: addForm.value.username,
-      password: addForm.value.password,
+      password: addForm.value.auth_source === 'local' ? addForm.value.password : undefined,
       role: addForm.value.role,
       is_active: addForm.value.is_active,
+      auth_source: addForm.value.auth_source,
+      ldap_config_id: addForm.value.ldap_config_id ?? undefined,
     })
     toast.add({ severity: 'success', summary: 'Created', detail: 'User created.', life: 3000 })
     addDialogVisible.value = false
@@ -206,7 +267,7 @@ function openEditDialog(user: UserManagementRead) {
   editTarget.value = user
   editForm.value = {
     password: '',
-    role: user.role as 'admin' | 'operator' | 'viewer',
+    role: user.role as AppRole,
     is_active: user.is_active,
   }
   editDialogVisible.value = true
@@ -216,7 +277,7 @@ async function updateUser() {
   if (!editTarget.value) return
   saving.value = true
   try {
-    const payload: { password?: string; role?: 'admin' | 'operator' | 'viewer'; is_active?: boolean } = {
+    const payload: { password?: string; role?: AppRole; is_active?: boolean } = {
       is_active: editForm.value.is_active,
     }
     if (editForm.value.password) payload.password = editForm.value.password
@@ -251,7 +312,9 @@ function confirmDelete(user: UserManagementRead) {
   })
 }
 
-onMounted(loadUsers)
+onMounted(async () => {
+  await Promise.all([loadUsers(), loadLdapConfigs()])
+})
 </script>
 
 <style scoped>
@@ -292,6 +355,7 @@ onMounted(loadUsers)
 }
 .text-muted {
   color: var(--p-surface-400);
+  font-size: 0.8rem;
 }
 .text-success {
   color: var(--p-green-500);

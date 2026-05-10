@@ -196,5 +196,20 @@ def decrypt_ca_passphrase(blob: bytes) -> str:
     return aesgcm.decrypt(nonce, ciphertext, None).decode()
 
 
+def encrypt_ldap_password(password: str) -> bytes:
+    key = _derive_ssh_encryption_key(label="ldap-bind-password-encryption")
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, password.encode(), None)
+    return nonce + ciphertext
+
+
+def decrypt_ldap_password(blob: bytes) -> str:
+    key = _derive_ssh_encryption_key(label="ldap-bind-password-encryption")
+    aesgcm = AESGCM(key)
+    nonce, ciphertext = blob[:12], blob[12:]
+    return aesgcm.decrypt(nonce, ciphertext, None).decode()
+
+
 def compute_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()

@@ -2,6 +2,7 @@ import apiClient from './client'
 import type {
   VpnInstanceCreate,
   VpnInstanceRead,
+  VpnInstanceUpdate,
   VpnInstanceStatus,
   DirectiveSpec,
   ServiceAction,
@@ -24,7 +25,7 @@ export const vpnInstancesApi = {
     return response.data
   },
 
-  async update(id: number, data: Partial<VpnInstanceCreate>): Promise<VpnInstanceRead> {
+  async update(id: number, data: VpnInstanceUpdate): Promise<VpnInstanceRead> {
     const response = await apiClient.put<VpnInstanceRead>(`/vpn-instances/${id}`, data)
     return response.data
   },

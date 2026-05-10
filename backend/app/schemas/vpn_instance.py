@@ -60,6 +60,8 @@ class VpnInstanceUpdate(BaseModel):
     easyrsa_server_id: int | None = None
     pam_enabled: bool | None = None
     enforce_cn_username: bool | None = None
+    ldap_auth_enabled: bool | None = None
+    ldap_config_id: int | None = None
     tls_auth_key: str | None = None
 
 
@@ -82,6 +84,8 @@ class VpnInstanceRead(BaseModel):
     easyrsa_server_id: int | None
     pam_enabled: bool
     enforce_cn_username: bool
+    ldap_auth_enabled: bool
+    ldap_config_id: int | None
     tls_auth_key: str | None
     has_ca_passphrase: bool = False
 

@@ -28,6 +28,10 @@ class VpnInstance(Base, TimestampMixin):
     tls_auth_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     easyrsa_use_sudo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
     enforce_cn_username: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    ldap_auth_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    ldap_config_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("ldap_configs.id", ondelete="SET NULL"), nullable=True
+    )
     # AES-256-GCM encrypted CA passphrase (nonce prepended)
     ca_passphrase_encrypted_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 

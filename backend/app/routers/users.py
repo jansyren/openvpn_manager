@@ -29,7 +29,24 @@ async def create_user_endpoint(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_superuser),
 ) -> UserManagementRead:
-    user = await create_user(db, body.username, body.password, body.role, body.is_active)
+    if body.auth_source == "ldap":
+        from app.core.exceptions import ValidationError
+        result = await db.execute(select(User).where(User.username == body.username))
+        if result.scalar_one_or_none() is not None:
+            raise ValidationError(f"Username '{body.username}' is already taken")
+        user = User(
+            username=body.username,
+            hashed_password="!ldap",
+            auth_source="ldap",
+            ldap_config_id=body.ldap_config_id,
+            role=body.role,
+            is_active=body.is_active,
+            is_superuser=False,
+        )
+        db.add(user)
+        await db.flush()
+    else:
+        user = await create_user(db, body.username, body.password, body.role, body.is_active)
     return UserManagementRead.model_validate(user)
 
 
