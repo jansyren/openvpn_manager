@@ -18,6 +18,7 @@ class VpnInstanceBase(BaseModel):
     easyrsa_path: str | None = None
     easyrsa_server_id: int | None = None
     pam_enabled: bool = False
+    enforce_cn_username: bool = False
 
     @field_validator("name")
     @classmethod
@@ -45,6 +46,7 @@ class VpnInstanceBase(BaseModel):
 
 class VpnInstanceCreate(VpnInstanceBase):
     server_id: int
+    import_existing: bool = False
 
 
 class VpnInstanceUpdate(BaseModel):
@@ -57,6 +59,7 @@ class VpnInstanceUpdate(BaseModel):
     easyrsa_path: str | None = None
     easyrsa_server_id: int | None = None
     pam_enabled: bool | None = None
+    enforce_cn_username: bool | None = None
     tls_auth_key: str | None = None
 
 
@@ -78,6 +81,7 @@ class VpnInstanceRead(BaseModel):
     easyrsa_path: str | None
     easyrsa_server_id: int | None
     pam_enabled: bool
+    enforce_cn_username: bool
     tls_auth_key: str | None
     has_ca_passphrase: bool = False
 
@@ -106,3 +110,8 @@ class DiscoveredConfig(BaseModel):
     path: str
     name: str
     size_bytes: int
+    port: int | None = None
+    proto: str | None = None
+    dev: str | None = None
+    network: str | None = None
+    netmask: str | None = None

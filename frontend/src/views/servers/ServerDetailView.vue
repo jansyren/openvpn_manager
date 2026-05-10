@@ -59,8 +59,34 @@
         <DataTable :value="discoveredConfigs" size="small">
           <Column field="name" header="Name" />
           <Column field="path" header="Path" />
+          <Column header="Proto">
+            <template #body="{ data }">{{ data.proto ?? '—' }}</template>
+          </Column>
+          <Column header="Port">
+            <template #body="{ data }">{{ data.port ?? '—' }}</template>
+          </Column>
+          <Column header="Dev">
+            <template #body="{ data }">{{ data.dev ?? '—' }}</template>
+          </Column>
+          <Column header="Network">
+            <template #body="{ data }">
+              {{ data.network && data.netmask ? `${data.network}/${data.netmask}` : '—' }}
+            </template>
+          </Column>
           <Column header="Size">
             <template #body="{ data }">{{ (data.size_bytes / 1024).toFixed(1) }} KB</template>
+          </Column>
+          <Column header="">
+            <template #body="{ data }">
+              <Button
+                label="Import"
+                icon="pi pi-download"
+                size="small"
+                :loading="importingPath === data.path"
+                :disabled="importedPaths.has(data.path)"
+                @click="importConfig(data)"
+              />
+            </template>
           </Column>
         </DataTable>
       </template>
@@ -82,6 +108,7 @@ import Column from 'primevue/column'
 import ProgressSpinner from 'primevue/progressspinner'
 import { useToast } from 'primevue/usetoast'
 import { serversApi } from '@/api/servers'
+import { vpnInstancesApi } from '@/api/vpnInstances'
 import type { ServerRead, ServerTestConnectionResult, DiscoveredConfig } from '@/types'
 
 const route = useRoute()
@@ -92,6 +119,8 @@ const connTestResult = ref<ServerTestConnectionResult | null>(null)
 const discoveredConfigs = ref<DiscoveredConfig[]>([])
 const testingConn = ref(false)
 const discovering = ref(false)
+const importingPath = ref<string | null>(null)
+const importedPaths = ref<Set<string>>(new Set())
 
 onMounted(async () => {
   server.value = await serversApi.get(Number(route.params.id))
@@ -113,6 +142,7 @@ async function testConnection(): Promise<void> {
 
 async function discoverConfigs(): Promise<void> {
   discovering.value = true
+  importedPaths.value = new Set()
   try {
     discoveredConfigs.value = await serversApi.discover(Number(route.params.id))
     toast.add({ severity: 'info', summary: 'Discovered', detail: `Found ${discoveredConfigs.value.length} config(s)`, life: 3000 })
@@ -120,6 +150,30 @@ async function discoverConfigs(): Promise<void> {
     toast.add({ severity: 'error', summary: 'Discovery Failed', detail: (e as { detail?: string }).detail, life: 5000 })
   } finally {
     discovering.value = false
+  }
+}
+
+async function importConfig(config: DiscoveredConfig): Promise<void> {
+  importingPath.value = config.path
+  try {
+    await vpnInstancesApi.create({
+      server_id: Number(route.params.id),
+      name: config.name,
+      config_path: config.path,
+      proto: (config.proto as 'udp' | 'tcp') ?? 'udp',
+      port: config.port ?? 1194,
+      dev: config.dev ?? 'tun',
+      network: config.network ?? undefined,
+      netmask: config.netmask ?? undefined,
+      import_existing: true,
+    })
+    importedPaths.value = new Set([...importedPaths.value, config.path])
+    toast.add({ severity: 'success', summary: 'Imported', detail: `"${config.name}" imported as a VPN instance`, life: 4000 })
+  } catch (e: unknown) {
+    const err = e as { detail?: string; message?: string }
+    toast.add({ severity: 'error', summary: 'Import Failed', detail: err.detail ?? err.message, life: 6000 })
+  } finally {
+    importingPath.value = null
   }
 }
 </script>

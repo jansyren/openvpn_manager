@@ -5,6 +5,8 @@ SECURITY: Passwords are NEVER passed on the command line.
 They are written to the subprocess stdin pipe only.
 """
 import re
+import secrets
+import string
 
 from app.core.exceptions import ValidationError
 from app.services.remote.base import Executor, prepare_sudo_command
@@ -221,6 +223,33 @@ async def create_user_with_hash(
             stdin_data2 = user_stdin
         result2 = await executor.run_command(chpasswd_cmd, timeout=10.0, stdin_data=stdin_data2)
         result2.raise_on_error(f"chpasswd -e {username}")
+
+
+def generate_secure_password(length: int = 20) -> str:
+    """Generate a cryptographically secure password with at least one of each character class."""
+    uppercase = string.ascii_uppercase
+    lowercase = string.ascii_lowercase
+    digits = string.digits
+    symbols = "!@#$%^&*()-_=+"
+    all_chars = uppercase + lowercase + digits + symbols
+    guaranteed = [
+        secrets.choice(uppercase),
+        secrets.choice(lowercase),
+        secrets.choice(digits),
+        secrets.choice(symbols),
+    ]
+    rest = [secrets.choice(all_chars) for _ in range(length - 4)]
+    combined = guaranteed + rest
+    import random
+    random.SystemRandom().shuffle(combined)
+    return "".join(combined)
+
+
+async def reset_password(executor: Executor, username: str, use_sudo: bool = False) -> str:
+    """Generate and set a new secure password. Returns the plaintext password (one-time)."""
+    new_password = generate_secure_password()
+    await _set_password(executor, username, new_password, use_sudo=use_sudo)
+    return new_password
 
 
 async def _set_password(executor: Executor, username: str, password: str, use_sudo: bool = False) -> None:

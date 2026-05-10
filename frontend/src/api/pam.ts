@@ -62,6 +62,16 @@ export const pamApi = {
     return response.data
   },
 
+  async resetPassword(
+    serverId: number,
+    username: string,
+  ): Promise<{ password: string; username: string }> {
+    const response = await apiClient.post<{ password: string; username: string }>(
+      `/pam/users/${serverId}/${username}/reset-password`,
+    )
+    return response.data
+  },
+
   async copyUsers(data: PamCopyRequest): Promise<PamCopyResult> {
     const response = await apiClient.post<PamCopyResult>('/pam/copy', data)
     return response.data

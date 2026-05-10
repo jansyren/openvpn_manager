@@ -7,6 +7,7 @@ from app.db.models.pam import PamGroup, PamUser
 from app.db.models.user import User
 from app.db.session import get_db
 from app.dependencies import get_current_superuser, get_current_user
+from app.db.models.vpn_instance import VpnInstance
 from app.schemas.pam import (
     PamCopyRequest,
     PamCopyResult,
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/pam", tags=["pam"])
 
 
 def _use_sudo(server) -> bool:
-    return server.sudo_password_encrypted_blob is not None
+    return server.use_sudo
 
 
 # ── Stored users (DB) ─────────────────────────────────────────────────────────
@@ -103,6 +104,34 @@ async def create_pam_user(
     await db.flush()
 
     return PamUserRead(username=body.username, groups=body.groups)
+
+
+@router.post("/users/{server_id}/{username}/reset-password")
+async def reset_pam_password(
+    server_id: int,
+    username: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> dict:
+    server = await get_server(db, server_id)
+    executor = get_executor(server)
+    use_sudo = _use_sudo(server)
+
+    new_password = await pam_service.reset_password(executor, username, use_sudo=use_sudo)
+
+    try:
+        shadow_hash = await pam_service.get_user_shadow_hash(executor, username, use_sudo=use_sudo)
+        if shadow_hash:
+            result = await db.execute(
+                select(PamUser).where(PamUser.server_id == server_id, PamUser.username == username)
+            )
+            pam_user = result.scalar_one_or_none()
+            if pam_user:
+                pam_user.passwd_hash = shadow_hash
+    except Exception:
+        pass
+
+    return {"password": new_password, "username": username}
 
 
 @router.put("/users/{server_id}/{username}", response_model=PamUserRead)

@@ -16,7 +16,7 @@ from app.schemas.vpn_instance import (
     VpnInstanceStatus,
     VpnInstanceUpdate,
 )
-from app.services import easyrsa_service
+from app.services import cn_verify_service, easyrsa_service
 from app.services.config_parser import ParsedConfig, parse_config, serialize_config
 from app.services.openvpn_directives import DirectiveSpec, get_all_directives
 from app.services.remote.base import prepare_sudo_command
@@ -71,48 +71,48 @@ async def create_instance(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_superuser),
 ) -> VpnInstanceRead:
-    instance = VpnInstance(**body.model_dump())
+    instance = VpnInstance(**body.model_dump(exclude={"import_existing"}))
     db.add(instance)
     await db.flush()
 
-    # Generate and write a base config file on the server
-    server = await get_server(db, body.server_id)
-    executor = get_executor(server)
-    network = body.network or "10.8.0.0"
-    netmask = body.netmask or "255.255.255.0"
-    base_config = ParsedConfig(
-        directives={
-            "port": str(body.port),
-            "proto": body.proto,
-            "dev": body.dev,
-            "server": f"{network} {netmask}",
-            "topology": "subnet",
-            "keepalive": "10 120",
-            "persist-key": True,
-            "persist-tun": True,
-            "user": "nobody",
-            "group": "nogroup",
-            "verb": "3",
-            "status": f"/var/log/openvpn/openvpn-status-{body.name}.log 30",
-            "ifconfig-pool-persist": f"/var/log/openvpn/ipp-{body.name}.txt",
-            "data-ciphers": "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
-            "auth": "SHA256",
-            "tls-version-min": "1.2",
-        },
-    )
-    content = serialize_config(base_config)
-    try:
-        # Ensure parent directory exists
-        from pathlib import PurePosixPath
-        parent_dir = str(PurePosixPath(body.config_path).parent)
-        sudo_pw = getattr(executor, "sudo_password", None)
-        mkdir_cmd, stdin_data = prepare_sudo_command(
-            ["/bin/mkdir", "-p", parent_dir], sudo_pw,
+    if not body.import_existing:
+        # Generate and write a base config file on the server
+        server = await get_server(db, body.server_id)
+        executor = get_executor(server)
+        network = body.network or "10.8.0.0"
+        netmask = body.netmask or "255.255.255.0"
+        base_config = ParsedConfig(
+            directives={
+                "port": str(body.port),
+                "proto": body.proto,
+                "dev": body.dev,
+                "server": f"{network} {netmask}",
+                "topology": "subnet",
+                "keepalive": "10 120",
+                "persist-key": True,
+                "persist-tun": True,
+                "user": "nobody",
+                "group": "nogroup",
+                "verb": "3",
+                "status": f"/var/log/openvpn/openvpn-status-{body.name}.log 30",
+                "ifconfig-pool-persist": f"/var/log/openvpn/ipp-{body.name}.txt",
+                "data-ciphers": "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
+                "auth": "SHA256",
+                "tls-version-min": "1.2",
+            },
         )
-        await executor.run_command(mkdir_cmd, timeout=10.0, stdin_data=stdin_data)
-        await _write_file_sudo(executor, body.config_path, content.encode())
-    except Exception:
-        pass  # Config write failure should not block instance creation
+        content = serialize_config(base_config)
+        try:
+            from pathlib import PurePosixPath
+            parent_dir = str(PurePosixPath(body.config_path).parent)
+            sudo_pw = getattr(executor, "sudo_password", None)
+            mkdir_cmd, stdin_data = prepare_sudo_command(
+                ["/bin/mkdir", "-p", parent_dir], sudo_pw,
+            )
+            await executor.run_command(mkdir_cmd, timeout=10.0, stdin_data=stdin_data)
+            await _write_file_sudo(executor, body.config_path, content.encode())
+        except Exception:
+            pass  # Config write failure should not block instance creation
 
     return VpnInstanceRead.model_validate(instance)
 
@@ -472,3 +472,34 @@ async def install_dh(
     await _write_file_sudo(vpn_executor, dh_dst, dh_bytes, mode=0o644)
 
     return {"dh_path": dh_dst}
+
+
+@router.post("/{instance_id}/deploy-cn-verify-script")
+async def deploy_cn_verify_script(
+    instance_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> dict:
+    """Deploy the CN-username verification script to the VPN server.
+
+    Writes verify_cn_username.sh to /etc/openvpn/scripts/ and makes it
+    executable. Add these directives to the server config to activate it:
+
+        script-security 2
+        auth-user-pass-verify /etc/openvpn/scripts/verify_cn_username.sh via-env
+    """
+    result = await db.execute(select(VpnInstance).where(VpnInstance.id == instance_id))
+    instance = result.scalar_one_or_none()
+    if instance is None:
+        from app.core.exceptions import NotFoundError
+        raise NotFoundError(f"VPN instance {instance_id} not found")
+
+    server = await get_server(db, instance.server_id)
+    executor = get_executor(server)
+
+    script_path = await cn_verify_service.deploy_script(executor, server.use_sudo)
+
+    return {
+        "script_path": script_path,
+        "config_directives": cn_verify_service.CONFIG_DIRECTIVES.strip(),
+    }

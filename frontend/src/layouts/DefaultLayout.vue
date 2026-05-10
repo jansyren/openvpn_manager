@@ -30,24 +30,91 @@
         <Button icon="pi pi-sign-out" severity="secondary" text @click="handleLogout" />
       </div>
     </nav>
-    <main class="content">
-      <RouterView />
-    </main>
+
+    <div class="content-area">
+      <div v-if="showContextBar" class="context-bar">
+        <i class="pi pi-server ctx-icon" />
+        <Select
+          :model-value="ctx.selectedServerId"
+          :options="serverOptions"
+          option-label="label"
+          option-value="value"
+          placeholder="Select Server"
+          show-clear
+          class="ctx-select"
+          @update:model-value="handleServerChange"
+        />
+        <i class="pi pi-shield ctx-icon" />
+        <Select
+          :model-value="ctx.selectedInstanceId"
+          :options="instanceOptions"
+          option-label="label"
+          option-value="value"
+          placeholder="Select VPN Instance"
+          show-clear
+          :disabled="!ctx.selectedServerId || ctx.instances.length === 0"
+          class="ctx-select"
+          @update:model-value="ctx.setInstance"
+        />
+        <span v-if="ctx.selectedServer" class="ctx-hint">
+          {{ ctx.selectedServer.is_local ? 'Local' : ctx.selectedServer.host }}
+        </span>
+      </div>
+
+      <main class="content">
+        <RouterView />
+      </main>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { useAuthStore } from '@/stores/auth'
-import { useRouter } from 'vue-router'
+import { computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
+import Select from 'primevue/select'
+import { useAuthStore } from '@/stores/auth'
+import { useContextStore } from '@/stores/context'
 
 const authStore = useAuthStore()
+const ctx = useContextStore()
 const router = useRouter()
+const route = useRoute()
+
+const CONTEXT_BAR_EXCLUDED: string[] = [
+  'servers',
+  'servers-new',
+  'server-detail',
+  'server-edit',
+  'vpn-instances',
+  'vpn-instance-detail',
+]
+
+const showContextBar = computed(() => {
+  const name = route.name as string | undefined
+  return !!name && !CONTEXT_BAR_EXCLUDED.includes(name)
+})
+
+const serverOptions = computed(() =>
+  ctx.servers.map((s) => ({ label: s.name, value: s.id })),
+)
+
+const instanceOptions = computed(() =>
+  ctx.instances.map((i) => ({ label: i.name, value: i.id })),
+)
+
+async function handleServerChange(id: number | null) {
+  await ctx.setServer(id)
+}
 
 async function handleLogout(): Promise<void> {
   await authStore.logout()
   router.push({ name: 'login' })
 }
+
+onMounted(async () => {
+  await ctx.init()
+})
 </script>
 
 <style scoped>
@@ -117,6 +184,39 @@ async function handleLogout(): Promise<void> {
 .username {
   font-size: 0.8rem;
   color: var(--p-surface-300);
+}
+
+/* ── Content area ───────────────────────────────────────────── */
+.content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.context-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1.5rem;
+  background: var(--p-surface-0);
+  border-bottom: 1px solid var(--p-surface-200);
+  flex-shrink: 0;
+}
+
+.ctx-icon {
+  color: var(--p-surface-400);
+  font-size: 0.9rem;
+}
+
+.ctx-select {
+  min-width: 200px;
+}
+
+.ctx-hint {
+  font-size: 0.8rem;
+  color: var(--p-surface-400);
+  margin-left: auto;
 }
 
 .content {

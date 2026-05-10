@@ -4,32 +4,12 @@
       <h1 class="page-title">Certificate Manager</h1>
     </div>
 
-    <div class="filter-bar">
-      <Select
-        v-model="selectedServerId"
-        :options="serverOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Select Server"
-        show-clear
-        class="filter-select"
-        @change="onServerChange"
-      />
-      <Select
-        v-model="selectedInstanceId"
-        :options="instanceOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Select VPN Instance"
-        show-clear
-        :disabled="!selectedServerId"
-        class="filter-select"
-        @change="loadCertificates"
-      />
-    </div>
+    <Message v-if="!ctx.selectedInstanceId" severity="info" :closable="false" style="margin-bottom:1rem">
+      Select a server and VPN instance in the header bar to view certificates.
+    </Message>
 
     <DataTable :value="certificates" :loading="loading" striped-rows :row-class="rowClass">
-      <template #empty>No certificates found.</template>
+      <template #empty>{{ ctx.selectedInstanceId ? 'No certificates found.' : 'Select a VPN instance first.' }}</template>
       <Column field="common_name" header="Common Name" />
       <Column header="Type">
         <template #body="{ data }">
@@ -122,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -132,28 +112,23 @@ import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
-import { useServersStore } from '@/stores/servers'
-import { vpnInstancesApi } from '@/api/vpnInstances'
+import Message from 'primevue/message'
+import { useContextStore } from '@/stores/context'
 import { certificatesApi } from '@/api/certificates'
-import type { CertificateRead, VpnInstanceRead } from '@/types'
+import type { CertificateRead } from '@/types'
 
 const toast = useToast()
-const serversStore = useServersStore()
+const ctx = useContextStore()
 
 const certificates = ref<CertificateRead[]>([])
-const instances = ref<VpnInstanceRead[]>([])
 const loading = ref(false)
-const selectedServerId = ref<number | null>(null)
-const selectedInstanceId = ref<number | null>(null)
 
-// Revoke state
 const revokeDialogVisible = ref(false)
 const revokeTarget = ref<CertificateRead | null>(null)
 const revokeReason = ref('unspecified')
 const revokePassphrase = ref('')
 const revoking = ref(false)
 
-// Renew state
 const renewDialogVisible = ref(false)
 const renewTarget = ref<CertificateRead | null>(null)
 const renewPassphrase = ref('')
@@ -170,12 +145,12 @@ const revokeReasons = [
   'certificateHold',
 ]
 
-const serverOptions = computed(() =>
-  serversStore.servers.map((s) => ({ label: s.name, value: s.id })),
-)
-
-const instanceOptions = computed(() =>
-  instances.value.map((i) => ({ label: i.name, value: i.id })),
+watch(
+  () => ctx.selectedInstanceId,
+  async (id) => {
+    certificates.value = []
+    if (id) await loadCertificates()
+  },
 )
 
 function certTypeSeverity(type: string): string {
@@ -207,28 +182,11 @@ function rowClass(data: CertificateRead): string {
   return ''
 }
 
-async function onServerChange() {
-  selectedInstanceId.value = null
-  certificates.value = []
-  if (!selectedServerId.value) {
-    instances.value = []
-    return
-  }
-  try {
-    instances.value = await vpnInstancesApi.list(selectedServerId.value)
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load instances', life: 4000 })
-  }
-}
-
 async function loadCertificates() {
-  if (!selectedInstanceId.value) {
-    certificates.value = []
-    return
-  }
+  if (!ctx.selectedInstanceId) { certificates.value = []; return }
   loading.value = true
   try {
-    certificates.value = await certificatesApi.list(selectedInstanceId.value)
+    certificates.value = await certificatesApi.list(ctx.selectedInstanceId)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load certificates', life: 4000 })
   } finally {
@@ -284,7 +242,7 @@ async function doRenew() {
 }
 
 onMounted(async () => {
-  await serversStore.fetchServers()
+  if (ctx.selectedInstanceId) await loadCertificates()
 })
 </script>
 
@@ -299,16 +257,6 @@ onMounted(async () => {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 700;
-}
-.filter-bar {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-.filter-select {
-  min-width: 220px;
 }
 .field {
   margin-bottom: 1rem;

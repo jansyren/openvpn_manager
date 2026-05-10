@@ -25,6 +25,7 @@ class ServerCreate(ServerBase):
     ssh_username: str | None = Field(None, max_length=64)
     # Base64-encoded private key PEM; will be encrypted server-side
     ssh_private_key_pem: str | None = None
+    use_sudo: bool = False
     # Sudo password for elevated commands; will be encrypted server-side
     sudo_password: str | None = None
 
@@ -47,6 +48,7 @@ class ServerUpdate(BaseModel):
     port: int | None = Field(None, ge=1, le=65535)
     ssh_username: str | None = Field(None, max_length=64)
     ssh_private_key_pem: str | None = None
+    use_sudo: bool | None = None
     sudo_password: str | None = None
 
     @field_validator("name")
@@ -66,6 +68,7 @@ class ServerRead(BaseModel):
     ssh_username: str | None
     ssh_host_fingerprint: str | None
     description: str | None
+    use_sudo: bool = False
     has_sudo_password: bool = False
 
     model_config = {"from_attributes": True}
@@ -81,6 +84,7 @@ class ServerRead(BaseModel):
             ssh_username=server.ssh_username,
             ssh_host_fingerprint=server.ssh_host_fingerprint,
             description=server.description,
+            use_sudo=server.use_sudo,
             has_sudo_password=server.sudo_password_encrypted_blob is not None,
         )
 

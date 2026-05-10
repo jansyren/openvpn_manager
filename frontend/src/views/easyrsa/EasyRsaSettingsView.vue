@@ -4,24 +4,17 @@
       <h1 class="page-title">Easy-RSA Settings</h1>
     </div>
 
-    <div class="filter-bar">
-      <Select
-        v-model="selectedServerId"
-        :options="serverOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Select Server"
-        show-clear
-        class="filter-select"
-        @change="onServerChange"
-      />
+    <Message v-if="!ctx.selectedServerId" severity="info" :closable="false" style="margin-bottom:1rem">
+      Select a server in the header bar to manage Easy-RSA settings.
+    </Message>
+
+    <div v-if="ctx.selectedServerId" class="filter-bar">
       <Select
         v-model="selectedInstanceId"
         :options="[{ label: '— Server-level (no VPN instance) —', value: -1 }, ...instanceOptions]"
         option-label="label"
         option-value="value"
-        placeholder="Server-level / VPN Instance"
-        :disabled="!selectedServerId"
+        placeholder="Select mode…"
         class="filter-select"
         @change="onModeChange"
       />
@@ -33,7 +26,7 @@
     </Message>
 
     <!-- Settings card: shown when a server is selected and mode is chosen -->
-    <div v-if="selectedServerId && selectedInstanceId !== null" class="settings-card">
+    <div v-if="ctx.selectedServerId && selectedInstanceId !== null" class="settings-card">
       <div class="stat-grid">
         <div class="stat-item">
           <span class="stat-label">EasyRSA Binary</span>
@@ -136,7 +129,7 @@
       </template>
     </div>
 
-    <div v-if="selectedServerId && selectedInstanceId !== null" class="action-grid">
+    <div v-if="ctx.selectedServerId && selectedInstanceId !== null" class="action-grid">
       <Button label="Init PKI" icon="pi pi-folder-open" severity="info" @click="openInitPkiDialog" />
       <Button label="Build CA" icon="pi pi-shield" severity="success" :disabled="!pkiInitialized" @click="openBuildCaDialog" />
       <Button label="Build Server Cert" icon="pi pi-server" severity="success" :disabled="!caBuilt" @click="openBuildServerDialog" />
@@ -144,7 +137,7 @@
     </div>
 
     <!-- CA Management -->
-    <div v-if="selectedServerId && selectedInstanceId !== null && caBuilt" class="settings-card" style="margin-top: 1rem">
+    <div v-if="ctx.selectedServerId && selectedInstanceId !== null && caBuilt" class="settings-card" style="margin-top: 1rem">
       <h3 style="margin:0 0 1rem;font-size:1rem;font-weight:700;">CA Management</h3>
       <div class="action-grid">
         <Button label="Renew CA" icon="pi pi-refresh" severity="warn" @click="openRenewCaDialog" />
@@ -253,7 +246,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import Button from 'primevue/button'
@@ -265,21 +258,18 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Textarea from 'primevue/textarea'
-import { useServersStore } from '@/stores/servers'
+import { useContextStore } from '@/stores/context'
 import { vpnInstancesApi } from '@/api/vpnInstances'
 import { easyrsaApi } from '@/api/easyrsa'
-import type { EasyRsaSettings, VpnInstanceRead } from '@/types'
-
+import type { EasyRsaSettings } from '@/types'
 
 const toast = useToast()
 const confirm = useConfirm()
-const serversStore = useServersStore()
+const ctx = useContextStore()
 
-const instances = ref<VpnInstanceRead[]>([])
 const settings = ref<EasyRsaSettings | null>(null)
-const selectedServerId = ref<number | null>(null)
 // -1 = server-level mode, >0 = VPN instance mode, null = nothing selected
-const selectedInstanceId = ref<number | null>(null)
+const selectedInstanceId = ref<number | null>(ctx.selectedInstanceId ?? -1)
 
 // Server-level settings (editable)
 const serverEasyrsaPath = ref('/usr/share/easy-rsa/easyrsa')
@@ -345,43 +335,37 @@ const serverLevelParams = computed(() => ({
 }))
 
 const serverOptions = computed(() =>
-  serversStore.servers.map((s) => ({ label: s.name, value: s.id })),
+  ctx.servers.map((s) => ({ label: s.name, value: s.id })),
 )
 
 function serverName(serverId: number): string {
-  return serversStore.servers.find((s) => s.id === serverId)?.name ?? String(serverId)
+  return ctx.servers.find((s) => s.id === serverId)?.name ?? String(serverId)
 }
 
 const instanceOptions = computed(() =>
-  instances.value.map((i) => ({ label: i.name, value: i.id })),
+  ctx.instances.map((i) => ({ label: i.name, value: i.id })),
 )
 
 const selectedInstance = computed(() =>
-  instances.value.find((i) => i.id === selectedInstanceId.value) ?? null,
+  ctx.instances.find((i) => i.id === selectedInstanceId.value) ?? null,
 )
 
 const selectedInstanceHasCaPassphrase = computed(() =>
   isInstanceMode.value && (selectedInstance.value?.has_ca_passphrase ?? false),
 )
 
-async function onServerChange() {
-  selectedInstanceId.value = null
-  settings.value = null
-  opOutput.value = ''
-  permissionError.value = false
-  errorDetail.value = null
-  serverPkiInitialized.value = false
-  serverCaBuilt.value = false
-  if (!selectedServerId.value) {
-    instances.value = []
-    return
-  }
-  try {
-    instances.value = await vpnInstancesApi.list(selectedServerId.value)
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load instances', life: 4000 })
-  }
-}
+watch(
+  () => ctx.selectedServerId,
+  () => {
+    selectedInstanceId.value = null
+    settings.value = null
+    opOutput.value = ''
+    permissionError.value = false
+    errorDetail.value = null
+    serverPkiInitialized.value = false
+    serverCaBuilt.value = false
+  },
+)
 
 async function onModeChange() {
   opOutput.value = ''
@@ -399,10 +383,10 @@ async function onModeChange() {
 }
 
 async function loadServerStatus() {
-  if (!selectedServerId.value) return
+  if (!ctx.selectedServerId) return
   statusLoading.value = true
   try {
-    const result = await easyrsaApi.serverPkiStatus(selectedServerId.value, serverLevelParams.value)
+    const result = await easyrsaApi.serverPkiStatus(ctx.selectedServerId, serverLevelParams.value)
     serverPkiInitialized.value = result.pki_initialized
     serverCaBuilt.value = result.ca_built
     permissionError.value = result.permission_error
@@ -442,8 +426,8 @@ async function saveCaPassphrase() {
   try {
     const updated = await vpnInstancesApi.setCaPassphrase(selectedInstanceId.value, caPassphraseInput.value)
     // Update local instance list to reflect new has_ca_passphrase state
-    const idx = instances.value.findIndex((i) => i.id === selectedInstanceId.value)
-    if (idx !== -1) instances.value[idx] = updated
+    const idx = ctx.instances.findIndex((i) => i.id === selectedInstanceId.value)
+    if (idx !== -1) ctx.instances[idx] = updated
     caPassphraseInput.value = ''
     toast.add({ severity: 'success', summary: 'Stored', detail: 'CA passphrase stored securely.', life: 3000 })
   } catch (e) {
@@ -458,8 +442,8 @@ async function clearCaPassphrase() {
   savingCaPassphrase.value = true
   try {
     const updated = await vpnInstancesApi.setCaPassphrase(selectedInstanceId.value, null)
-    const idx = instances.value.findIndex((i) => i.id === selectedInstanceId.value)
-    if (idx !== -1) instances.value[idx] = updated
+    const idx = ctx.instances.findIndex((i) => i.id === selectedInstanceId.value)
+    if (idx !== -1) ctx.instances[idx] = updated
     toast.add({ severity: 'success', summary: 'Cleared', detail: 'Stored CA passphrase removed.', life: 3000 })
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to clear passphrase', life: 4000 })
@@ -534,7 +518,7 @@ async function doInitPki() {
   try {
     let result: { output?: string }
     if (isServerMode.value) {
-      result = await easyrsaApi.serverInitPki(selectedServerId.value!, { ...serverLevelParams.value, force: initPkiForce.value })
+      result = await easyrsaApi.serverInitPki(ctx.selectedServerId!, { ...serverLevelParams.value, force: initPkiForce.value })
     } else {
       result = await easyrsaApi.initPki(selectedInstanceId.value!, initPkiForce.value)
     }
@@ -563,7 +547,7 @@ async function doBuildCa() {
   try {
     let result: { output?: string }
     if (isServerMode.value) {
-      result = await easyrsaApi.serverBuildCa(selectedServerId.value!, {
+      result = await easyrsaApi.serverBuildCa(ctx.selectedServerId!, {
         ...serverLevelParams.value,
         common_name: caForm.value.common_name,
         passphrase: caForm.value.passphrase,
@@ -601,7 +585,7 @@ async function doBuildServer() {
   try {
     let result: { output?: string }
     if (isServerMode.value) {
-      result = await easyrsaApi.serverBuildServer(selectedServerId.value!, {
+      result = await easyrsaApi.serverBuildServer(ctx.selectedServerId!, {
         ...serverLevelParams.value,
         common_name: serverForm.value.common_name,
         passphrase: serverForm.value.passphrase || undefined,
@@ -636,7 +620,7 @@ function confirmGenDh() {
       try {
         let result: { output?: string }
         if (isServerMode.value) {
-          result = await easyrsaApi.serverGenDh(selectedServerId.value!, serverLevelParams.value)
+          result = await easyrsaApi.serverGenDh(ctx.selectedServerId!, serverLevelParams.value)
         } else {
           result = await easyrsaApi.genDh(selectedInstanceId.value!)
         }
@@ -665,7 +649,7 @@ async function doRenewCa() {
   try {
     let result: { message?: string }
     if (isServerMode.value) {
-      result = await easyrsaApi.serverRenewCa(selectedServerId.value!, {
+      result = await easyrsaApi.serverRenewCa(ctx.selectedServerId!, {
         ...serverLevelParams.value,
         ca_passphrase: renewCaForm.value.passphrase,
         expire_days: renewCaForm.value.expire_days,
@@ -701,7 +685,7 @@ async function doCrossSign() {
   try {
     let result: { cross_cert_pem?: string; message?: string }
     if (isServerMode.value) {
-      result = await easyrsaApi.serverCrossSign(selectedServerId.value!, {
+      result = await easyrsaApi.serverCrossSign(ctx.selectedServerId!, {
         ...serverLevelParams.value,
         new_ca_csr_pem: crossSignForm.value.new_ca_csr_pem,
         old_ca_passphrase: crossSignForm.value.old_ca_passphrase,
@@ -733,7 +717,9 @@ async function refreshStatus() {
 }
 
 onMounted(async () => {
-  await serversStore.fetchServers()
+  if (ctx.selectedServerId && selectedInstanceId.value !== null) {
+    await onModeChange()
+  }
 })
 </script>
 

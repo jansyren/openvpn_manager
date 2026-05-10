@@ -147,7 +147,7 @@ async def create_client(
             executor = get_executor(server)
             await pam_service.create_user(
                 executor, body.name, body.pam_password, body.pam_groups or ["openvpn"],
-                use_sudo=instance.easyrsa_use_sudo,
+                use_sudo=server.use_sudo,
             )
 
     client = VpnClient(

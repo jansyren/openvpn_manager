@@ -9,6 +9,7 @@ from app.core.exceptions import ConflictError, NotFoundError, RemoteExecutionErr
 from app.core.security import encrypt_ssh_key, encrypt_sudo_password
 from app.db.models.server import Server
 from app.schemas.server import ServerCreate, ServerUpdate
+from app.services.config_parser import parse_config
 from app.services.remote.local_executor import LocalExecutor
 from app.services.remote.remote_executor import RemoteExecutor, _create_connection
 
@@ -39,6 +40,7 @@ async def create_server(db: AsyncSession, data: ServerCreate) -> Server:
         "host": data.host,
         "port": data.port,
         "ssh_username": data.ssh_username,
+        "use_sudo": data.use_sudo,
     }
 
     if data.ssh_private_key_pem:
@@ -69,6 +71,8 @@ async def update_server(db: AsyncSession, server_id: int, data: ServerUpdate) ->
         server.ssh_username = data.ssh_username
     if data.ssh_private_key_pem is not None:
         server.ssh_key_encrypted_blob = encrypt_ssh_key(data.ssh_private_key_pem.encode())
+    if data.use_sudo is not None:
+        server.use_sudo = data.use_sudo
     if data.sudo_password is not None:
         server.sudo_password_encrypted_blob = encrypt_sudo_password(data.sudo_password)
 
@@ -135,7 +139,37 @@ async def discover_configs(db: AsyncSession, server_id: int, config_dir: str = "
             name = path.rsplit("/", 1)[-1].removesuffix(".conf")
             try:
                 content = await executor.read_file(path)
-                configs.append({"path": path, "name": name, "size_bytes": len(content)})
+                parsed = parse_config(content.decode("utf-8", errors="replace"))
+                d = parsed.directives
+
+                port_raw = d.get("port")
+                port = int(port_raw) if port_raw and str(port_raw).isdigit() else None
+
+                proto = d.get("proto") if isinstance(d.get("proto"), str) else None
+
+                dev_raw = d.get("dev")
+                if isinstance(dev_raw, str):
+                    dev = "tun" if dev_raw.startswith("tun") else ("tap" if dev_raw.startswith("tap") else dev_raw)
+                else:
+                    dev = None
+
+                network = netmask = None
+                server_val = d.get("server")
+                if isinstance(server_val, str):
+                    parts = server_val.split()
+                    if len(parts) >= 2:
+                        network, netmask = parts[0], parts[1]
+
+                configs.append({
+                    "path": path,
+                    "name": name,
+                    "size_bytes": len(content),
+                    "port": port,
+                    "proto": proto,
+                    "dev": dev,
+                    "network": network,
+                    "netmask": netmask,
+                })
             except Exception:
                 configs.append({"path": path, "name": name, "size_bytes": 0})
 

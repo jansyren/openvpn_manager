@@ -88,4 +88,9 @@ export const vpnInstancesApi = {
     })
     return response.data
   },
+
+  async deployCnVerifyScript(id: number): Promise<{ script_path: string; config_directives: string }> {
+    const response = await apiClient.post(`/vpn-instances/${id}/deploy-cn-verify-script`)
+    return response.data
+  },
 }

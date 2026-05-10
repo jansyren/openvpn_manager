@@ -1,0 +1,14 @@
+services:
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: test
+    command: uv run pytest -v
+
+  frontend-test:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: test
+    command: sh -c "npm run type-check && npm run test:unit"

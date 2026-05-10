@@ -2,27 +2,18 @@
   <div>
     <div class="page-header">
       <h1 class="page-title">Deployment</h1>
-    </div>
-
-    <div class="filter-bar">
-      <Select
-        v-model="selectedServerId"
-        :options="serverOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Select Server"
-        show-clear
-        class="filter-select"
-        @change="onServerChange"
-      />
       <Button
         label="Check Prerequisites"
         icon="pi pi-search"
         :loading="checkingPrereqs"
-        :disabled="!selectedServerId"
+        :disabled="!ctx.selectedServerId"
         @click="checkPrerequisites"
       />
     </div>
+
+    <Message v-if="!ctx.selectedServerId" severity="info" :closable="false" style="margin-bottom:1rem">
+      Select a server in the header bar to manage deployment.
+    </Message>
 
     <!-- Prerequisites Card -->
     <div v-if="prerequisites" class="prereq-card">
@@ -103,22 +94,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
-import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
-import { useServersStore } from '@/stores/servers'
+import { useContextStore } from '@/stores/context'
 import { deployApi } from '@/api/deploy'
 import type { DeployPrerequisites, DeployTaskStatus } from '@/types'
 
 const toast = useToast()
-const serversStore = useServersStore()
+const ctx = useContextStore()
 
-const selectedServerId = ref<number | null>(null)
 const checkingPrereqs = ref(false)
 const prerequisites = ref<DeployPrerequisites | null>(null)
 const deploying = ref(false)
@@ -133,8 +122,13 @@ const deployOptions = ref({
   easyrsa_install_dir: '/usr/share/easy-rsa',
 })
 
-const serverOptions = computed(() =>
-  serversStore.servers.map((s) => ({ label: s.name, value: s.id })),
+watch(
+  () => ctx.selectedServerId,
+  () => {
+    prerequisites.value = null
+    taskStatus.value = null
+    stopPolling()
+  },
 )
 
 function taskStatusSeverity(status: string): string {
@@ -144,17 +138,11 @@ function taskStatusSeverity(status: string): string {
   return 'secondary'
 }
 
-function onServerChange() {
-  prerequisites.value = null
-  taskStatus.value = null
-  stopPolling()
-}
-
 async function checkPrerequisites() {
-  if (!selectedServerId.value) return
+  if (!ctx.selectedServerId) return
   checkingPrereqs.value = true
   try {
-    prerequisites.value = await deployApi.checkPrerequisites(selectedServerId.value)
+    prerequisites.value = await deployApi.checkPrerequisites(ctx.selectedServerId)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to check prerequisites', life: 4000 })
   } finally {
@@ -163,12 +151,12 @@ async function checkPrerequisites() {
 }
 
 async function startDeploy() {
-  if (!selectedServerId.value) return
+  if (!ctx.selectedServerId) return
   deploying.value = true
   taskStatus.value = null
   stopPolling()
   try {
-    const result = await deployApi.startDeployment(selectedServerId.value, {
+    const result = await deployApi.startDeployment(ctx.selectedServerId, {
       install_openvpn: deployOptions.value.install_openvpn,
       install_easyrsa: deployOptions.value.install_easyrsa,
       openvpn_config_dir: deployOptions.value.openvpn_config_dir,
@@ -189,9 +177,7 @@ function startPolling(taskId: string) {
       const status = await deployApi.getStatus(taskId)
       taskStatus.value = status
       await nextTick()
-      if (logRef.value) {
-        logRef.value.scrollTop = logRef.value.scrollHeight
-      }
+      if (logRef.value) logRef.value.scrollTop = logRef.value.scrollHeight
       if (status.status === 'completed' || status.status === 'failed') {
         stopPolling()
         deploying.value = false
@@ -225,16 +211,6 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 700;
-}
-.filter-bar {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
-}
-.filter-select {
-  min-width: 220px;
 }
 .prereq-card,
 .deploy-options {

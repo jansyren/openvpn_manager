@@ -15,7 +15,9 @@ class Server(Base, TimestampMixin):
     ssh_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # AES-256-GCM encrypted private key bytes (nonce prepended)
     ssh_key_encrypted_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    # AES-256-GCM encrypted sudo password (nonce prepended)
+    # Whether to run privileged commands (useradd, etc.) via sudo
+    use_sudo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # AES-256-GCM encrypted sudo password (nonce prepended); None = passwordless sudo
     sudo_password_encrypted_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     # SHA-256 fingerprint of the server's SSH host key for TOFU
     ssh_host_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)

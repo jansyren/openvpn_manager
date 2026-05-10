@@ -49,6 +49,8 @@ export interface ServerRead {
   ssh_username: string | null
   ssh_host_fingerprint: string | null
   description: string | null
+  use_sudo: boolean
+  has_sudo_password: boolean
 }
 
 export interface ServerCreate {
@@ -59,6 +61,8 @@ export interface ServerCreate {
   ssh_username?: string
   ssh_private_key_pem?: string
   description?: string
+  use_sudo?: boolean
+  sudo_password?: string
 }
 
 export interface ServerTestConnectionResult {
@@ -71,6 +75,11 @@ export interface DiscoveredConfig {
   path: string
   name: string
   size_bytes: number
+  port: number | null
+  proto: string | null
+  dev: string | null
+  network: string | null
+  netmask: string | null
 }
 
 // ── VPN Instances ─────────────────────────────────────────────────────────
@@ -88,6 +97,7 @@ export interface VpnInstanceRead {
   easyrsa_path: string | null
   easyrsa_server_id: number | null
   pam_enabled: boolean
+  enforce_cn_username: boolean
   tls_auth_key: string | null
   has_ca_passphrase: boolean
 }
@@ -104,6 +114,7 @@ export interface VpnInstanceCreate {
   easyrsa_path?: string
   easyrsa_server_id?: number
   pam_enabled?: boolean
+  import_existing?: boolean
 }
 
 export interface VpnInstanceStatus {

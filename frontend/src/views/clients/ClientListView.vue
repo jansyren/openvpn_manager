@@ -3,36 +3,19 @@
     <div class="page-header">
       <h1 class="page-title">VPN Clients</h1>
       <div class="action-btns">
-        <Button label="Add Client" icon="pi pi-plus" :disabled="!selectedInstanceId" @click="openAddDialog" />
+        <Button label="Add Client" icon="pi pi-plus" :disabled="!ctx.selectedInstanceId" @click="openAddDialog" />
       </div>
     </div>
 
-    <div class="filter-bar">
-      <Select
-        v-model="selectedServerId"
-        :options="serverOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Select Server"
-        show-clear
-        class="filter-select"
-        @change="onServerChange"
-      />
-      <Select
-        v-model="selectedInstanceId"
-        :options="instanceOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Select VPN Instance"
-        show-clear
-        :disabled="!selectedServerId"
-        class="filter-select"
-        @change="loadClients"
-      />
-    </div>
+    <Message v-if="!ctx.selectedServerId" severity="info" :closable="false" style="margin-bottom:1rem">
+      Select a server and VPN instance in the header bar to manage clients.
+    </Message>
+    <Message v-else-if="!ctx.selectedInstanceId" severity="info" :closable="false" style="margin-bottom:1rem">
+      Select a VPN instance in the header bar to view clients.
+    </Message>
 
     <DataTable :value="clients" :loading="loading" striped-rows>
-      <template #empty>No clients found.</template>
+      <template #empty>{{ ctx.selectedInstanceId ? 'No clients found.' : 'Select a VPN instance first.' }}</template>
       <Column field="name" header="Name" />
       <Column header="Type">
         <template #body="{ data }">
@@ -178,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import DataTable from 'primevue/datatable'
@@ -191,20 +174,17 @@ import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
-import { useServersStore } from '@/stores/servers'
-import { vpnInstancesApi } from '@/api/vpnInstances'
+import Message from 'primevue/message'
+import { useContextStore } from '@/stores/context'
 import { clientsApi } from '@/api/clients'
-import type { VpnClientRead, VpnInstanceRead } from '@/types'
+import type { VpnClientRead } from '@/types'
 
 const toast = useToast()
 const confirm = useConfirm()
-const serversStore = useServersStore()
+const ctx = useContextStore()
 
 const clients = ref<VpnClientRead[]>([])
-const instances = ref<VpnInstanceRead[]>([])
 const loading = ref(false)
-const selectedServerId = ref<number | null>(null)
-const selectedInstanceId = ref<number | null>(null)
 const addDialogVisible = ref(false)
 const saving = ref(false)
 const revokeDialogVisible = ref(false)
@@ -228,40 +208,19 @@ const clientTypeOptions = [
   { label: 'Site-to-site', value: 'site' },
 ]
 
-const serverOptions = computed(() =>
-  serversStore.servers.map((s) => ({ label: s.name, value: s.id })),
+watch(
+  () => ctx.selectedInstanceId,
+  async (id) => {
+    clients.value = []
+    if (id) await loadClients()
+  },
 )
-
-const instanceOptions = computed(() =>
-  instances.value.map((i) => ({ label: i.name, value: i.id })),
-)
-
-const selectedInstance = computed(() =>
-  instances.value.find((i) => i.id === selectedInstanceId.value) ?? null,
-)
-
-async function onServerChange() {
-  selectedInstanceId.value = null
-  clients.value = []
-  if (!selectedServerId.value) {
-    instances.value = []
-    return
-  }
-  try {
-    instances.value = await vpnInstancesApi.list(selectedServerId.value)
-  } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load instances', life: 4000 })
-  }
-}
 
 async function loadClients() {
-  if (!selectedInstanceId.value) {
-    clients.value = []
-    return
-  }
+  if (!ctx.selectedInstanceId) { clients.value = []; return }
   loading.value = true
   try {
-    clients.value = await clientsApi.list(selectedInstanceId.value)
+    clients.value = await clientsApi.list(ctx.selectedInstanceId)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load clients', life: 4000 })
   } finally {
@@ -276,14 +235,14 @@ function openAddDialog() {
 }
 
 async function createClient() {
-  if (!selectedInstanceId.value || !form.value.name) {
+  if (!ctx.selectedInstanceId || !form.value.name) {
     toast.add({ severity: 'warn', summary: 'Validation', detail: 'Name is required.', life: 3000 })
     return
   }
   saving.value = true
   try {
     const payload: Record<string, unknown> = {
-      vpn_instance_id: selectedInstanceId.value,
+      vpn_instance_id: ctx.selectedInstanceId,
       name: form.value.name,
       client_type: form.value.client_type,
       email: form.value.email || undefined,
@@ -368,7 +327,7 @@ function confirmDelete(client: VpnClientRead) {
 }
 
 onMounted(async () => {
-  await serversStore.fetchServers()
+  if (ctx.selectedInstanceId) await loadClients()
 })
 </script>
 
@@ -387,16 +346,6 @@ onMounted(async () => {
 .action-btns {
   display: flex;
   gap: 0.5rem;
-}
-.filter-bar {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-.filter-select {
-  min-width: 220px;
 }
 .field {
   margin-bottom: 1rem;
@@ -423,5 +372,10 @@ onMounted(async () => {
 .cert-serial {
   font-family: monospace;
   font-size: 0.8rem;
+}
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 </style>

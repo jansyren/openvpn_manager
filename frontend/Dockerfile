@@ -1,8 +1,17 @@
-FROM node:22-alpine AS build
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 COPY package.json ./
 RUN npm install
+
+# ── Test stage ────────────────────────────────────────────────────────────────
+FROM deps AS test
+
+COPY . .
+CMD ["sh", "-c", "npm run type-check && npm run test:unit"]
+
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM deps AS build
 
 COPY . .
 RUN npm run build

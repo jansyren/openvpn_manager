@@ -274,6 +274,40 @@
             <small class="text-muted">Leave blank to omit tls-auth from generated client configs.</small>
           </div>
           <Button label="Save Settings" icon="pi pi-save" :loading="settingsSaving" @click="saveSettings" />
+
+          <Divider />
+          <h3 class="settings-heading">CN / Username Enforcement</h3>
+          <p class="settings-desc">
+            When enabled, OpenVPN will call a verification script to ensure the client certificate's
+            Common Name (CN) matches the username supplied at login. This prevents a user from
+            authenticating with someone else's certificate.
+          </p>
+
+          <div class="field field-inline">
+            <Checkbox v-model="settingsEnforceCn" :binary="true" input-id="enforce-cn" @change="saveSettings" />
+            <label for="enforce-cn">Enforce CN = Username on this instance</label>
+          </div>
+
+          <div v-if="settingsEnforceCn" class="cn-deploy-section">
+            <p class="settings-desc">
+              Deploy the verification script to <code>/etc/openvpn/scripts/verify_cn_username.sh</code> on the server,
+              then add the directives shown below to the server config (Config Editor tab).
+            </p>
+            <Button
+              label="Deploy Script to Server"
+              icon="pi pi-upload"
+              severity="info"
+              :loading="cnScriptDeploying"
+              @click="deployCnScript"
+            />
+            <div v-if="cnScriptDeployed" class="cn-result">
+              <Message severity="success" :closable="false">
+                Script deployed to <code>{{ cnScriptPath }}</code>
+              </Message>
+              <p class="settings-desc" style="margin-top: 0.75rem">Add these directives to the server config:</p>
+              <pre class="directives-box">{{ cnConfigDirectives }}</pre>
+            </div>
+          </div>
         </div>
       </TabPanel>
 
@@ -317,6 +351,8 @@ import Select from 'primevue/select'
 import Checkbox from 'primevue/checkbox'
 import Textarea from 'primevue/textarea'
 import InputText from 'primevue/inputtext'
+import Divider from 'primevue/divider'
+import Message from 'primevue/message'
 import { vpnInstancesApi } from '@/api/vpnInstances'
 import type { VpnInstanceRead, VpnInstanceStatus, ServiceAction, DirectiveSpec } from '@/types'
 
@@ -344,9 +380,15 @@ const configSaving = ref(false)
 const statusLoading = ref(false)
 const actionLoading = ref<string | null>(null)
 const settingsPamEnabled = ref(false)
+const settingsEnforceCn = ref(false)
 const settingsTlsAuthKey = ref('')
 const settingsSaving = ref(false)
 const tlsKeyLoading = ref(false)
+
+const cnScriptDeploying = ref(false)
+const cnScriptDeployed = ref(false)
+const cnScriptPath = ref('')
+const cnConfigDirectives = ref('')
 
 // PKI integration
 const pkiCerts = ref<string[]>([])
@@ -452,6 +494,7 @@ async function loadInstance() {
   try {
     instance.value = await vpnInstancesApi.get(instanceId)
     settingsPamEnabled.value = instance.value.pam_enabled
+    settingsEnforceCn.value = instance.value.enforce_cn_username
     settingsTlsAuthKey.value = instance.value.tls_auth_key ?? ''
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load instance', life: 4000 })
@@ -604,6 +647,7 @@ async function saveSettings() {
   try {
     instance.value = await vpnInstancesApi.update(instanceId, {
       pam_enabled: settingsPamEnabled.value,
+      enforce_cn_username: settingsEnforceCn.value,
       tls_auth_key: settingsTlsAuthKey.value || null,
     })
     toast.add({ severity: 'success', summary: 'Saved', detail: 'Settings updated.', life: 3000 })
@@ -611,6 +655,22 @@ async function saveSettings() {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to save settings', life: 4000 })
   } finally {
     settingsSaving.value = false
+  }
+}
+
+async function deployCnScript() {
+  cnScriptDeploying.value = true
+  cnScriptDeployed.value = false
+  try {
+    const result = await vpnInstancesApi.deployCnVerifyScript(instanceId)
+    cnScriptPath.value = result.script_path
+    cnConfigDirectives.value = result.config_directives
+    cnScriptDeployed.value = true
+    toast.add({ severity: 'success', summary: 'Deployed', detail: `Script deployed to ${result.script_path}`, life: 4000 })
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to deploy script', life: 4000 })
+  } finally {
+    cnScriptDeploying.value = false
   }
 }
 
@@ -881,5 +941,30 @@ onMounted(async () => {
 }
 .dh-status {
   flex: 1;
+}
+.settings-desc {
+  font-size: 0.875rem;
+  color: var(--p-surface-600);
+  margin: 0 0 0.75rem;
+  line-height: 1.5;
+}
+.cn-deploy-section {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.cn-result {
+  margin-top: 0.25rem;
+}
+.directives-box {
+  background: var(--p-surface-900);
+  color: var(--p-surface-100);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  white-space: pre;
+  margin: 0;
 }
 </style>

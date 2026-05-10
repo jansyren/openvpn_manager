@@ -4,22 +4,12 @@
       <h1 class="page-title">PAM User Manager</h1>
     </div>
 
-    <Message severity="info" :closable="false" class="pam-notice">
+    <Message v-if="!ctx.selectedServerId" severity="info" :closable="false" class="pam-notice">
+      Select a server in the header bar to manage PAM users.
+    </Message>
+    <Message v-else severity="info" :closable="false" class="pam-notice">
       PAM user management requires sudo configured on the target server.
     </Message>
-
-    <div class="filter-bar">
-      <Select
-        v-model="selectedServerId"
-        :options="serverOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Select Server"
-        show-clear
-        class="filter-select"
-        @change="onServerChange"
-      />
-    </div>
 
     <TabView>
       <!-- Users Tab -->
@@ -32,13 +22,13 @@
               class="filter-input"
               @keyup.enter="loadUsers"
             />
-            <Button label="Filter" icon="pi pi-search" severity="secondary" :disabled="!selectedServerId" @click="loadUsers" />
+            <Button label="Filter" icon="pi pi-search" severity="secondary" :disabled="!ctx.selectedServerId" @click="loadUsers" />
           </div>
-          <Button label="Add User" icon="pi pi-plus" :disabled="!selectedServerId" @click="openAddUserDialog" />
+          <Button label="Add User" icon="pi pi-plus" :disabled="!ctx.selectedServerId" @click="openAddUserDialog" />
         </div>
 
         <DataTable :value="users" :loading="usersLoading" striped-rows>
-          <template #empty>No users found.</template>
+          <template #empty>{{ ctx.selectedServerId ? 'No users found.' : 'Select a server first.' }}</template>
           <Column field="username" header="Username" />
           <Column field="uid" header="UID">
             <template #body="{ data }">{{ data.uid ?? '—' }}</template>
@@ -59,7 +49,7 @@
               <Tag v-else value="Not stored" severity="secondary" />
             </template>
           </Column>
-          <Column header="Actions" style="width: 10rem">
+          <Column header="Actions" style="width: 12rem">
             <template #body="{ data }">
               <Button
                 v-tooltip.top="'Generate Certificate'"
@@ -69,6 +59,15 @@
                 rounded
                 class="mr-1"
                 @click="openGenCertDialog(data)"
+              />
+              <Button
+                v-tooltip.top="'Reset Password'"
+                icon="pi pi-refresh"
+                severity="warn"
+                text
+                rounded
+                class="mr-1"
+                @click="openResetPasswordDialog(data)"
               />
               <Button
                 icon="pi pi-trash"
@@ -86,7 +85,7 @@
       <TabPanel header="Groups">
         <div class="tab-toolbar">
           <span />
-          <Button label="Add Group" icon="pi pi-plus" :disabled="!selectedServerId" @click="openAddGroupDialog" />
+          <Button label="Add Group" icon="pi pi-plus" :disabled="!ctx.selectedServerId" @click="openAddGroupDialog" />
         </div>
 
         <DataTable :value="storedGroups" :loading="groupsLoading" striped-rows>
@@ -118,6 +117,11 @@
           </p>
 
           <div class="field">
+            <label>Source Server</label>
+            <p class="field-value">{{ ctx.selectedServer?.name ?? '— none selected —' }}</p>
+          </div>
+
+          <div class="field">
             <label>Target Server *</label>
             <Select
               v-model="targetServerId"
@@ -137,7 +141,7 @@
           <Button
             label="Copy Users"
             icon="pi pi-copy"
-            :disabled="!selectedServerId || !targetServerId"
+            :disabled="!ctx.selectedServerId || !targetServerId"
             :loading="copying"
             @click="copyToServer"
           />
@@ -182,6 +186,43 @@
       <template #footer>
         <Button label="Cancel" severity="secondary" @click="addUserDialogVisible = false" />
         <Button label="Create" :loading="userSaving" @click="createUser" />
+      </template>
+    </Dialog>
+
+    <!-- Reset Password Dialog -->
+    <Dialog v-model:visible="resetPasswordDialogVisible" :header="`Reset Password — ${resetPasswordUsername}`" modal style="width: 440px" :closable="!resetPasswordLoading">
+      <div v-if="!generatedPassword">
+        <p>Generate a new secure 20-character password for <strong>{{ resetPasswordUsername }}</strong>?</p>
+        <p class="text-muted" style="font-size:0.875rem">The password will be shown once and cannot be retrieved again.</p>
+      </div>
+      <div v-else class="password-reveal">
+        <p class="password-reveal-label">New password (copy it now — it will not be shown again):</p>
+        <div class="password-box">
+          <code class="password-value">{{ generatedPassword }}</code>
+          <Button
+            icon="pi pi-copy"
+            severity="secondary"
+            text
+            rounded
+            v-tooltip="copied ? 'Copied!' : 'Copy to clipboard'"
+            @click="copyPassword"
+          />
+        </div>
+        <Message v-if="copied" severity="success" :closable="false" style="margin-top:0.5rem">
+          Copied to clipboard.
+        </Message>
+      </div>
+      <template #footer>
+        <Button v-if="!generatedPassword" label="Cancel" severity="secondary" @click="closeResetDialog" />
+        <Button
+          v-if="!generatedPassword"
+          label="Generate & Set"
+          icon="pi pi-refresh"
+          severity="warn"
+          :loading="resetPasswordLoading"
+          @click="doResetPassword"
+        />
+        <Button v-if="generatedPassword" label="Done" @click="closeResetDialog" />
       </template>
     </Dialog>
 
@@ -235,7 +276,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import DataTable from 'primevue/datatable'
@@ -250,7 +291,7 @@ import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
 import TabView from 'primevue/tabview'
 import TabPanel from 'primevue/tabpanel'
-import { useServersStore } from '@/stores/servers'
+import { useContextStore } from '@/stores/context'
 import { pamApi } from '@/api/pam'
 import { vpnInstancesApi } from '@/api/vpnInstances'
 import { clientsApi } from '@/api/clients'
@@ -258,29 +299,27 @@ import type { PamUserRead, StoredPamGroupRead, StoredPamUserRead, PamCopyResult,
 
 const toast = useToast()
 const confirm = useConfirm()
-const serversStore = useServersStore()
+const ctx = useContextStore()
 
-// ── Server selection ──────────────────────────────────────────────────────────
-const selectedServerId = ref<number | null>(null)
-
-const serverOptions = computed(() =>
-  serversStore.servers.map((s) => ({ label: s.name, value: s.id })),
-)
-
+// ── Target server options for copy tab ───────────────────────────────────────
 const targetServerOptions = computed(() =>
-  serversStore.servers
-    .filter((s) => s.id !== selectedServerId.value)
+  ctx.servers
+    .filter((s) => s.id !== ctx.selectedServerId)
     .map((s) => ({ label: s.name, value: s.id })),
 )
 
-async function onServerChange() {
-  users.value = []
-  storedGroups.value = []
-  copyResult.value = null
-  if (selectedServerId.value) {
-    await Promise.all([loadUsers(), loadStoredUsers(), loadStoredGroups()])
-  }
-}
+// ── React to server context changes ─────────────────────────────────────────
+watch(
+  () => ctx.selectedServerId,
+  async (id) => {
+    users.value = []
+    storedGroups.value = []
+    copyResult.value = null
+    if (id) {
+      await Promise.all([loadUsers(), loadStoredUsers(), loadStoredGroups()])
+    }
+  },
+)
 
 // ── Users tab ─────────────────────────────────────────────────────────────────
 const users = ref<PamUserRead[]>([])
@@ -301,10 +340,10 @@ const storedUserMap = computed(() => {
 })
 
 async function loadUsers() {
-  if (!selectedServerId.value) return
+  if (!ctx.selectedServerId) return
   usersLoading.value = true
   try {
-    users.value = await pamApi.listUsers(selectedServerId.value, groupFilter.value || undefined)
+    users.value = await pamApi.listUsers(ctx.selectedServerId, groupFilter.value || undefined)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load users', life: 4000 })
   } finally {
@@ -313,9 +352,9 @@ async function loadUsers() {
 }
 
 async function loadStoredUsers() {
-  if (!selectedServerId.value) return
+  if (!ctx.selectedServerId) return
   try {
-    storedUsers.value = await pamApi.listStoredUsers(selectedServerId.value)
+    storedUsers.value = await pamApi.listStoredUsers(ctx.selectedServerId)
   } catch {
     // non-critical
   }
@@ -327,25 +366,47 @@ function openAddUserDialog() {
 }
 
 async function createUser() {
-  if (!selectedServerId.value || !userForm.value.username || !userForm.value.password) {
+  if (!ctx.selectedServerId || !userForm.value.username || !userForm.value.password) {
     toast.add({ severity: 'warn', summary: 'Validation', detail: 'Username and password are required.', life: 3000 })
     return
   }
   userSaving.value = true
+  const username = userForm.value.username
   try {
     const groups = userForm.value.groupsRaw.split(',').map((g) => g.trim()).filter(Boolean)
-    await pamApi.createUser(selectedServerId.value, {
-      username: userForm.value.username,
-      password: userForm.value.password,
-      groups,
-    })
+    await pamApi.createUser(ctx.selectedServerId, { username, password: userForm.value.password, groups })
     toast.add({ severity: 'success', summary: 'Created', detail: 'User created.', life: 3000 })
     addUserDialogVisible.value = false
     await Promise.all([loadUsers(), loadStoredUsers()])
+    // Feature 3: auto-link existing PKI certificate if context instance is set
+    await tryImportCert(username)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to create user', life: 4000 })
   } finally {
     userSaving.value = false
+  }
+}
+
+async function tryImportCert(username: string) {
+  const instanceId = ctx.selectedInstanceId
+  if (!instanceId) return
+  try {
+    const existing = await clientsApi.list(instanceId)
+    if (existing.some((c) => c.name === username)) return
+    await clientsApi.create({
+      vpn_instance_id: instanceId,
+      name: username,
+      client_type: 'user',
+      import_existing: true,
+    })
+    toast.add({
+      severity: 'info',
+      summary: 'Certificate linked',
+      detail: `Existing PKI certificate for "${username}" was imported automatically.`,
+      life: 5000,
+    })
+  } catch {
+    // No cert in PKI — silently ignore
   }
 }
 
@@ -357,7 +418,7 @@ function confirmDeleteUser(user: PamUserRead) {
     severity: 'danger',
     accept: async () => {
       try {
-        await pamApi.deleteUser(selectedServerId.value!, user.username)
+        await pamApi.deleteUser(ctx.selectedServerId!, user.username)
         toast.add({ severity: 'success', summary: 'Deleted', detail: 'User deleted.', life: 3000 })
         await Promise.all([loadUsers(), loadStoredUsers()])
       } catch (e) {
@@ -365,6 +426,49 @@ function confirmDeleteUser(user: PamUserRead) {
       }
     },
   })
+}
+
+// ── Reset Password (Feature 2) ────────────────────────────────────────────────
+const resetPasswordDialogVisible = ref(false)
+const resetPasswordUsername = ref('')
+const generatedPassword = ref('')
+const resetPasswordLoading = ref(false)
+const copied = ref(false)
+
+function openResetPasswordDialog(user: PamUserRead) {
+  resetPasswordUsername.value = user.username
+  generatedPassword.value = ''
+  copied.value = false
+  resetPasswordDialogVisible.value = true
+}
+
+function closeResetDialog() {
+  resetPasswordDialogVisible.value = false
+  generatedPassword.value = ''
+  copied.value = false
+}
+
+async function doResetPassword() {
+  if (!ctx.selectedServerId) return
+  resetPasswordLoading.value = true
+  try {
+    const result = await pamApi.resetPassword(ctx.selectedServerId, resetPasswordUsername.value)
+    generatedPassword.value = result.password
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to reset password', life: 4000 })
+  } finally {
+    resetPasswordLoading.value = false
+  }
+}
+
+async function copyPassword() {
+  try {
+    await navigator.clipboard.writeText(generatedPassword.value)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 3000)
+  } catch {
+    toast.add({ severity: 'warn', summary: 'Copy failed', detail: 'Please copy the password manually.', life: 4000 })
+  }
 }
 
 // ── Groups tab ────────────────────────────────────────────────────────────────
@@ -376,10 +480,10 @@ const groupSaving = ref(false)
 const groupForm = ref<{ name: string; gid: number | null }>({ name: '', gid: null })
 
 async function loadStoredGroups() {
-  if (!selectedServerId.value) return
+  if (!ctx.selectedServerId) return
   groupsLoading.value = true
   try {
-    storedGroups.value = await pamApi.listStoredGroups(selectedServerId.value)
+    storedGroups.value = await pamApi.listStoredGroups(ctx.selectedServerId)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load groups', life: 4000 })
   } finally {
@@ -393,13 +497,13 @@ function openAddGroupDialog() {
 }
 
 async function createGroup() {
-  if (!selectedServerId.value || !groupForm.value.name) {
+  if (!ctx.selectedServerId || !groupForm.value.name) {
     toast.add({ severity: 'warn', summary: 'Validation', detail: 'Group name is required.', life: 3000 })
     return
   }
   groupSaving.value = true
   try {
-    await pamApi.createGroup(selectedServerId.value, {
+    await pamApi.createGroup(ctx.selectedServerId, {
       name: groupForm.value.name,
       gid: groupForm.value.gid ?? undefined,
     })
@@ -421,7 +525,7 @@ function confirmDeleteGroup(group: StoredPamGroupRead) {
     severity: 'danger',
     accept: async () => {
       try {
-        await pamApi.deleteGroup(selectedServerId.value!, group.name)
+        await pamApi.deleteGroup(ctx.selectedServerId!, group.name)
         toast.add({ severity: 'success', summary: 'Deleted', detail: 'Group deleted.', life: 3000 })
         await loadStoredGroups()
       } catch (e) {
@@ -450,17 +554,17 @@ const genCertInstanceHasPassphrase = computed(() =>
 
 async function openGenCertDialog(user: PamUserRead) {
   genCertUsername.value = user.username
-  genCertInstanceId.value = null
   genCertPassphrase.value = ''
   genCertExpireDays.value = 825
-  // Load VPN instances for the selected server (and all instances if none match)
   try {
-    vpnInstances.value = selectedServerId.value
-      ? await vpnInstancesApi.list(selectedServerId.value)
+    vpnInstances.value = ctx.selectedServerId
+      ? await vpnInstancesApi.list(ctx.selectedServerId)
       : await vpnInstancesApi.list()
   } catch {
     vpnInstances.value = []
   }
+  // Pre-select context instance if available
+  genCertInstanceId.value = ctx.selectedInstanceId ?? null
   genCertDialogVisible.value = true
 }
 
@@ -503,12 +607,12 @@ const copying = ref(false)
 const copyResult = ref<PamCopyResult | null>(null)
 
 async function copyToServer() {
-  if (!selectedServerId.value || !targetServerId.value) return
+  if (!ctx.selectedServerId || !targetServerId.value) return
   copying.value = true
   copyResult.value = null
   try {
     copyResult.value = await pamApi.copyUsers({
-      source_server_id: selectedServerId.value,
+      source_server_id: ctx.selectedServerId,
       target_server_id: targetServerId.value,
       include_groups: includeGroups.value,
     })
@@ -520,7 +624,9 @@ async function copyToServer() {
 }
 
 onMounted(async () => {
-  await serversStore.fetchServers()
+  if (ctx.selectedServerId) {
+    await Promise.all([loadUsers(), loadStoredUsers(), loadStoredGroups()])
+  }
 })
 </script>
 
@@ -538,16 +644,6 @@ onMounted(async () => {
 }
 .pam-notice {
   margin-bottom: 1rem;
-}
-.filter-bar {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-.filter-select {
-  min-width: 220px;
 }
 .filter-input {
   min-width: 200px;
@@ -572,6 +668,11 @@ onMounted(async () => {
   margin-bottom: 0.35rem;
   font-weight: 600;
   font-size: 0.875rem;
+}
+.field-value {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--p-surface-600);
 }
 .field-checkbox {
   display: flex;
@@ -606,5 +707,39 @@ onMounted(async () => {
 }
 .failed-item {
   color: var(--p-red-500, #ef4444);
+}
+
+/* Password reveal */
+.password-reveal {
+  padding: 0.25rem 0;
+}
+.password-reveal-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--p-surface-600);
+}
+.password-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--p-surface-100);
+  border: 1px solid var(--p-surface-300);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+}
+.password-value {
+  flex: 1;
+  font-family: monospace;
+  font-size: 1rem;
+  letter-spacing: 0.05em;
+  word-break: break-all;
+  color: var(--p-surface-900);
+}
+.text-muted {
+  color: var(--p-surface-400);
+}
+.mr-1 {
+  margin-right: 0.25rem;
 }
 </style>

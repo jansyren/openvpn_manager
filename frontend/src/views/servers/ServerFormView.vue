@@ -50,6 +50,23 @@
               />
               <small class="p-error">{{ errors.ssh_key }}</small>
             </div>
+
+            <div class="field-checkbox">
+              <Checkbox id="use_sudo" v-model="form.use_sudo" binary />
+              <label for="use_sudo">Use sudo for privileged commands (useradd, service control, etc.)</label>
+            </div>
+
+            <div v-if="form.use_sudo" class="field">
+              <label for="sudo_password">Sudo Password <span class="optional">(leave empty for passwordless sudo)</span></label>
+              <Password
+                id="sudo_password"
+                v-model="form.sudo_password"
+                class="w-full"
+                :feedback="false"
+                toggle-mask
+                placeholder="Leave empty if NOPASSWD is configured"
+              />
+            </div>
           </template>
 
           <div class="form-actions">
@@ -70,6 +87,7 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Textarea from 'primevue/textarea'
 import Checkbox from 'primevue/checkbox'
+import Password from 'primevue/password'
 import Button from 'primevue/button'
 import { useToast } from 'primevue/usetoast'
 import { useServersStore } from '@/stores/servers'
@@ -90,6 +108,8 @@ const form = ref({
   port: 22,
   ssh_username: '',
   ssh_private_key_pem: '',
+  use_sudo: false,
+  sudo_password: '',
 })
 const errors = ref<Record<string, string>>({})
 
@@ -102,6 +122,7 @@ onMounted(async () => {
     form.value.host = server.host ?? ''
     form.value.port = server.port
     form.value.ssh_username = server.ssh_username ?? ''
+    form.value.use_sudo = server.use_sudo
   }
 })
 
@@ -130,6 +151,10 @@ async function handleSubmit(): Promise<void> {
       ssh_private_key_pem: form.value.is_local || !form.value.ssh_private_key_pem
         ? undefined
         : form.value.ssh_private_key_pem,
+      use_sudo: form.value.is_local ? undefined : form.value.use_sudo,
+      sudo_password: form.value.is_local || !form.value.use_sudo || !form.value.sudo_password
+        ? undefined
+        : form.value.sudo_password,
     }
 
     if (isEdit.value) {
@@ -155,4 +180,5 @@ async function handleSubmit(): Promise<void> {
 .field label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.375rem; }
 .field-checkbox { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
 .form-actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem; }
+.optional { font-weight: 400; color: var(--p-surface-500); font-size: 0.8rem; }
 </style>

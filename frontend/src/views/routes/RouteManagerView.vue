@@ -3,30 +3,21 @@
     <div class="page-header">
       <h1 class="page-title">Route Manager</h1>
       <div class="action-btns">
+        <Button
+          label="Show Live Routing Table"
+          icon="pi pi-table"
+          severity="secondary"
+          :loading="liveLoading"
+          :disabled="!ctx.selectedServerId"
+          @click="loadLiveRoutes"
+        />
         <Button label="Add Route" icon="pi pi-plus" @click="openAddDialog" />
       </div>
     </div>
 
-    <div class="filter-bar">
-      <Select
-        v-model="selectedServerId"
-        :options="serverOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="All Servers"
-        show-clear
-        class="filter-select"
-        @change="loadRoutes"
-      />
-      <Button
-        label="Show Live Routing Table"
-        icon="pi pi-table"
-        severity="secondary"
-        :loading="liveLoading"
-        :disabled="!selectedServerId"
-        @click="loadLiveRoutes"
-      />
-    </div>
+    <Message v-if="!ctx.selectedServerId" severity="info" :closable="false" style="margin-bottom:1rem">
+      Select a server in the header bar to view routes.
+    </Message>
 
     <Panel v-if="liveRoutes !== null" header="Live Routing Table" toggleable class="live-panel">
       <pre class="live-output">{{ liveRoutes.routes.join('\n') || 'Empty routing table.' }}</pre>
@@ -126,7 +117,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import DataTable from 'primevue/datatable'
@@ -139,19 +130,19 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Panel from 'primevue/panel'
-import { useServersStore } from '@/stores/servers'
+import Message from 'primevue/message'
+import { useContextStore } from '@/stores/context'
 import { routesApi } from '@/api/routes'
 import type { RouteRead, LiveRoutingTable } from '@/types'
 
 const toast = useToast()
 const confirm = useConfirm()
-const serversStore = useServersStore()
+const ctx = useContextStore()
 
 const routes = ref<RouteRead[]>([])
 const loading = ref(false)
 const liveRoutes = ref<LiveRoutingTable | null>(null)
 const liveLoading = ref(false)
-const selectedServerId = ref<number | null>(null)
 const addDialogVisible = ref(false)
 const saving = ref(false)
 const applyingId = ref<number | null>(null)
@@ -166,18 +157,25 @@ const form = ref({
 })
 
 const serverOptions = computed(() =>
-  serversStore.servers.map((s) => ({ label: s.name, value: s.id })),
+  ctx.servers.map((s) => ({ label: s.name, value: s.id })),
 )
 
 function serverName(serverId: number): string {
-  return serversStore.servers.find((s) => s.id === serverId)?.name ?? String(serverId)
+  return ctx.servers.find((s) => s.id === serverId)?.name ?? String(serverId)
 }
+
+watch(
+  () => ctx.selectedServerId,
+  async () => {
+    liveRoutes.value = null
+    await loadRoutes()
+  },
+)
 
 async function loadRoutes() {
   loading.value = true
-  liveRoutes.value = null
   try {
-    routes.value = await routesApi.list(selectedServerId.value ?? undefined)
+    routes.value = await routesApi.list(ctx.selectedServerId ?? undefined)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load routes', life: 4000 })
   } finally {
@@ -186,10 +184,10 @@ async function loadRoutes() {
 }
 
 async function loadLiveRoutes() {
-  if (!selectedServerId.value) return
+  if (!ctx.selectedServerId) return
   liveLoading.value = true
   try {
-    liveRoutes.value = await routesApi.getLive(selectedServerId.value)
+    liveRoutes.value = await routesApi.getLive(ctx.selectedServerId)
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load live routes', life: 4000 })
   } finally {
@@ -198,7 +196,14 @@ async function loadLiveRoutes() {
 }
 
 function openAddDialog() {
-  form.value = { server_id: selectedServerId.value, source_tun: '', dest_tun: '', destination_network: '', metric: 0, is_persistent: false }
+  form.value = {
+    server_id: ctx.selectedServerId,
+    source_tun: '',
+    dest_tun: '',
+    destination_network: '',
+    metric: 0,
+    is_persistent: false,
+  }
   addDialogVisible.value = true
 }
 
@@ -272,7 +277,6 @@ function confirmDelete(route: RouteRead) {
 }
 
 onMounted(async () => {
-  await serversStore.fetchServers()
   await loadRoutes()
 })
 </script>
@@ -292,16 +296,6 @@ onMounted(async () => {
 .action-btns {
   display: flex;
   gap: 0.5rem;
-}
-.filter-bar {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
-.filter-select {
-  min-width: 220px;
 }
 .live-panel {
   margin-bottom: 1.5rem;
