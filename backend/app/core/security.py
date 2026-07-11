@@ -70,7 +70,9 @@ def create_access_token(subject: str | int, additional_claims: dict[str, Any] | 
     return jwt.encode(payload, settings.jwt_private_key, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(subject: str | int) -> tuple[str, datetime]:
+def create_refresh_token(
+    subject: str | int, additional_claims: dict[str, Any] | None = None
+) -> tuple[str, datetime]:
     settings = get_settings()
     now = datetime.now(UTC)
     expire = now + timedelta(days=settings.jwt_refresh_token_expire_days)
@@ -83,6 +85,8 @@ def create_refresh_token(subject: str | int) -> tuple[str, datetime]:
         "jti": jti,
         "type": "refresh",
     }
+    if additional_claims:
+        payload.update(additional_claims)
 
     token = jwt.encode(payload, settings.jwt_private_key, algorithm=settings.jwt_algorithm)
     return token, expire

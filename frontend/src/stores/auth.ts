@@ -13,7 +13,14 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!accessToken.value)
   const isSuperuser = computed(() => currentUser.value?.is_superuser ?? false)
   const role = computed(() => currentUser.value?.role ?? null)
-  const isVpnUser = computed(() => currentUser.value?.role === 'vpn_user')
+  const roles = computed(() => currentUser.value?.roles ?? [])
+  const activeRole = computed(() => currentUser.value?.active_role ?? null)
+  // "Admin-capable right now" — mirrors backend get_current_superuser's is_superuser-OR-admin-role check.
+  const canAdminister = computed(() => isSuperuser.value || activeRole.value === 'admin')
+  // Nav rendering reflects the CURRENTLY ACTIVE role, not just the DB-stored primary role.
+  const isVpnUser = computed(() => activeRole.value === 'vpn_user')
+  // Hard route lock-in: only when vpn_user is the user's ONLY resolved role (no switcher escape hatch).
+  const isVpnUserOnly = computed(() => roles.value.length === 1 && roles.value[0] === 'vpn_user')
 
   async function login(username: string, password: string): Promise<void> {
     loading.value = true
@@ -53,6 +60,18 @@ export const useAuthStore = defineStore('auth', () => {
     currentUser.value = await authApi.me()
   }
 
+  async function switchRole(role: string): Promise<void> {
+    loading.value = true
+    try {
+      const tokenData = await authApi.switchRole(role)
+      accessToken.value = tokenData.access_token
+      setAccessToken(tokenData.access_token)
+      currentUser.value = await authApi.me()
+    } finally {
+      loading.value = false
+    }
+  }
+
   return {
     accessToken,
     currentUser,
@@ -60,10 +79,15 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isSuperuser,
     role,
+    roles,
+    activeRole,
+    canAdminister,
     isVpnUser,
+    isVpnUserOnly,
     login,
     logout,
     tryRefresh,
     fetchMe,
+    switchRole,
   }
 })

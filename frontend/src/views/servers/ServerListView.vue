@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">Servers</h1>
       <Button
-        v-if="authStore.isSuperuser"
+        v-if="authStore.canAdminister"
         label="Add Server"
         icon="pi pi-plus"
         @click="$router.push({ name: 'servers-new' })"
@@ -44,7 +44,7 @@
               @click="$router.push({ name: 'server-detail', params: { id: data.id } })"
             />
             <Button
-              v-if="authStore.isSuperuser"
+              v-if="authStore.canAdminister"
               icon="pi pi-pencil"
               size="small"
               severity="secondary"
@@ -52,7 +52,7 @@
               @click="$router.push({ name: 'server-edit', params: { id: data.id } })"
             />
             <Button
-              v-if="authStore.isSuperuser"
+              v-if="authStore.canAdminister"
               icon="pi pi-trash"
               size="small"
               severity="danger"

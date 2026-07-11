@@ -30,7 +30,7 @@ const router = createRouter({
           path: 'servers/new',
           name: 'servers-new',
           component: () => import('@/views/servers/ServerFormView.vue'),
-          meta: { requiresSuperuser: true },
+          meta: { requiresAdmin: true },
         },
         {
           path: 'servers/:id',
@@ -41,7 +41,7 @@ const router = createRouter({
           path: 'servers/:id/edit',
           name: 'server-edit',
           component: () => import('@/views/servers/ServerFormView.vue'),
-          meta: { requiresSuperuser: true },
+          meta: { requiresAdmin: true },
         },
         // VPN Instances
         {
@@ -77,14 +77,14 @@ const router = createRouter({
           path: 'pam',
           name: 'pam',
           component: () => import('@/views/pam/PamUserManagerView.vue'),
-          meta: { requiresSuperuser: true },
+          meta: { requiresAdmin: true },
         },
         // Easy-RSA
         {
           path: 'easyrsa',
           name: 'easyrsa',
           component: () => import('@/views/easyrsa/EasyRsaSettingsView.vue'),
-          meta: { requiresSuperuser: true },
+          meta: { requiresAdmin: true },
         },
         // Backup
         {
@@ -97,21 +97,21 @@ const router = createRouter({
           path: 'deploy',
           name: 'deploy',
           component: () => import('@/views/deploy/DeploymentView.vue'),
-          meta: { requiresSuperuser: true },
+          meta: { requiresAdmin: true },
         },
         // Users
         {
           path: 'users',
           name: 'users',
           component: () => import('@/views/users/UserListView.vue'),
-          meta: { requiresSuperuser: true },
+          meta: { requiresAdmin: true },
         },
         // LDAP / Active Directory
         {
           path: 'ldap',
           name: 'ldap',
           component: () => import('@/views/ldap/LdapSettingsView.vue'),
-          meta: { requiresSuperuser: true },
+          meta: { requiresAdmin: true },
         },
         // My VPN (vpn_user portal)
         {
@@ -141,12 +141,13 @@ router.beforeEach(async (to) => {
     }
   }
 
-  if (to.meta.requiresSuperuser && !authStore.isSuperuser) {
+  if (to.meta.requiresAdmin && !authStore.canAdminister) {
     return { name: 'dashboard' }
   }
 
-  // vpn_user role is restricted to the my-vpn route only
-  if (authStore.isVpnUser && to.name !== 'my-vpn') {
+  // Only hard-lock a user into /my-vpn when vpn_user is their ONLY resolved role —
+  // a dual-role user can switch into vpn_user without losing access to other routes.
+  if (authStore.isVpnUserOnly && to.name !== 'my-vpn') {
     return { name: 'my-vpn' }
   }
 

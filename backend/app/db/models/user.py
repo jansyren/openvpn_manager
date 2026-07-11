@@ -14,6 +14,8 @@ class User(Base, TimestampMixin):
     # '!ldap' sentinel stored for LDAP users; checked via auth_source before use
     hashed_password: Mapped[str] = mapped_column(String(128), nullable=False, server_default="!ldap")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Local "break-glass" superuser flag only; LDAP admins pass authorization via
+    # active_role == "admin" instead (see dependencies.get_current_superuser).
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     role: Mapped[str] = mapped_column(String(16), default="admin", nullable=False, server_default="admin")
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

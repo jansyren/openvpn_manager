@@ -16,6 +16,8 @@ export interface UserRead {
   role: string
   is_active: boolean
   is_superuser: boolean
+  roles: string[]
+  active_role: string
 }
 
 export interface UserManagementRead {

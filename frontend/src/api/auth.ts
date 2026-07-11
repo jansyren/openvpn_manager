@@ -24,4 +24,9 @@ export const authApi = {
   async changePassword(data: { current_password: string; new_password: string }): Promise<void> {
     await apiClient.put('/auth/me/password', data)
   },
+
+  async switchRole(role: string): Promise<TokenResponse> {
+    const response = await apiClient.post<TokenResponse>('/auth/switch-role', { role })
+    return response.data
+  },
 }
