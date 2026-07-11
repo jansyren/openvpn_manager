@@ -38,4 +38,9 @@ export const clientsApi = {
     a.click()
     URL.revokeObjectURL(url)
   },
+
+  async previewOvpn(id: number): Promise<string> {
+    const response = await apiClient.get(`/clients/${id}/ovpn`, { responseType: 'text' })
+    return response.data
+  },
 }

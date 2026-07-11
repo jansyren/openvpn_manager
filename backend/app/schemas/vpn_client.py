@@ -22,6 +22,10 @@ class VpnClientCreate(BaseModel):
 
     # Import mode: verify existing PAM user + import existing PKI cert; skip creation
     import_existing: bool = False
+    # When import_existing and client_type == "user": verify a matching PAM account
+    # exists before importing. Set False to import a cert-only client (e.g. an
+    # app-managed LDAP/local "vpn_user" account with no corresponding PAM user).
+    require_pam_user: bool = True
 
     @field_validator("name")
     @classmethod

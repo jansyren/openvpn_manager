@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: openvpn
       POSTGRES_DB: openvpn_manager
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - openvpn_manager_db_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openvpn -d openvpn_manager"]
@@ -42,4 +42,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  db_data:
+  openvpn_manager_db_data:
+    external: true

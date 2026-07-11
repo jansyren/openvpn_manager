@@ -203,6 +203,7 @@ export interface VpnClientCreate {
   pam_password?: string
   pam_groups?: string[]
   import_existing?: boolean
+  require_pam_user?: boolean
 }
 
 // ── Certificates ──────────────────────────────────────────────────────────

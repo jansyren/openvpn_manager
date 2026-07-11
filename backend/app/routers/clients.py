@@ -73,7 +73,7 @@ async def create_client(
 
     if body.import_existing:
         # --- Import mode: verify existing PAM user, import existing PKI cert ---
-        if body.client_type == "user":
+        if body.client_type == "user" and body.require_pam_user:
             server = await get_server(db, instance.server_id)
             executor = get_executor(server)
             verify = await executor.run_command(

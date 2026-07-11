@@ -10,6 +10,8 @@ from app.db.models.user import User
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, TokenResponse, UserRead
 from app.services.auth_service import authenticate, change_password, create_tokens, refresh_access_token
 
+from app.config import get_settings
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _REFRESH_COOKIE = "refresh_token"
@@ -30,7 +32,7 @@ async def login(
         key=_REFRESH_COOKIE,
         value=tokens["refresh_token"],
         httponly=True,
-        secure=True,
+        secure=get_settings().is_production,
         samesite="strict",
         max_age=_COOKIE_MAX_AGE,
         path="/api/v1/auth",
@@ -60,7 +62,7 @@ async def logout(
         except Exception:
             pass
 
-    response.delete_cookie(_REFRESH_COOKIE, path="/api/v1/auth")
+    response.delete_cookie(_REFRESH_COOKIE, path="/api/v1/auth", secure=get_settings().is_production)
     return {"message": "Logged out successfully"}
 
 
@@ -81,7 +83,7 @@ async def refresh(
         key=_REFRESH_COOKIE,
         value=tokens["refresh_token"],
         httponly=True,
-        secure=True,
+        secure=get_settings().is_production,
         samesite="strict",
         max_age=_COOKIE_MAX_AGE,
         path="/api/v1/auth",

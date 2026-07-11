@@ -12,11 +12,18 @@ from app.services.easyrsa_service import (
 from app.services.remote.base import ExecutionResult
 
 
-def make_executor(returncode: int = 0, stdout: str = "OK", stderr: str = "") -> AsyncMock:
+def make_executor(
+    returncode: int = 0,
+    stdout: str = "OK",
+    stderr: str = "",
+    file_exists: dict[str, bool] | None = None,
+) -> AsyncMock:
     mock = AsyncMock()
     mock.run_command.return_value = ExecutionResult(
         returncode=returncode, stdout=stdout, stderr=stderr
     )
+    exists_map = file_exists or {}
+    mock.file_exists.side_effect = lambda path: exists_map.get(path, False)
     return mock
 
 
@@ -86,3 +93,48 @@ async def test_init_pki_raises_on_failure():
     executor = make_executor(returncode=1, stderr="PKI init failed")
     with pytest.raises(RemoteExecutionError):
         await init_pki(executor, "/usr/share/easy-rsa/easyrsa", "/etc/easy-rsa/pki")
+
+
+@pytest.mark.asyncio
+async def test_build_client_full_removes_stale_unsigned_request():
+    """A leftover reqs/<cn>.req from a previously failed build (e.g. wrong CA
+    passphrase) should be cleared automatically so the retry can succeed,
+    since easy-rsa refuses to overwrite an existing request file."""
+    executor = make_executor(
+        stdout="build-client-full complete",
+        file_exists={"/etc/easy-rsa/pki/reqs/myclient.req": True},
+    )
+    await build_client_full(
+        executor,
+        "/usr/share/easy-rsa/easyrsa",
+        "/etc/easy-rsa/pki",
+        "myclient",
+        "ca-pass-phrase",
+    )
+
+    rm_calls = [
+        c for c in executor.run_command.call_args_list if c[0][0][:2] == ["/bin/rm", "-f"]
+    ]
+    assert len(rm_calls) == 1
+    assert rm_calls[0][0][0][2] == "/etc/easy-rsa/pki/reqs/myclient.req"
+
+    build_calls = [c for c in executor.run_command.call_args_list if "build-client-full" in c[0][0]]
+    assert len(build_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_build_client_full_raises_when_certificate_already_issued():
+    """If a signed cert already exists, don't delete anything or retry the
+    build — surface a clear error instead of easy-rsa's cryptic CLI message."""
+    executor = make_executor(
+        file_exists={"/etc/easy-rsa/pki/issued/myclient.crt": True},
+    )
+    with pytest.raises(ValidationError):
+        await build_client_full(
+            executor,
+            "/usr/share/easy-rsa/easyrsa",
+            "/etc/easy-rsa/pki",
+            "myclient",
+            "ca-pass-phrase",
+        )
+    executor.run_command.assert_not_called()

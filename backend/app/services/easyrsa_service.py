@@ -99,6 +99,48 @@ async def build_ca(
     return result.stdout
 
 
+async def _file_exists_maybe_sudo(executor: Executor, path: str, use_sudo: bool) -> bool:
+    """Like pki_status's existence check: fall back to `sudo ls` on permission error."""
+    from app.core.exceptions import RemoteExecutionError
+
+    try:
+        return await executor.file_exists(path)
+    except RemoteExecutionError:
+        if not use_sudo:
+            raise
+        sudo_pw = getattr(executor, "sudo_password", None)
+        cmd, stdin_data = prepare_sudo_command(["/bin/ls", path], sudo_pw)
+        result = await executor.run_command(cmd, timeout=5.0, stdin_data=stdin_data)
+        return result.success
+
+
+async def _clear_stale_request(
+    executor: Executor, pki_dir: str, common_name: str, use_sudo: bool
+) -> None:
+    """Discard a leftover, unsigned CSR from a previous failed build attempt.
+
+    easy-rsa's build-*-full refuses to run when reqs/<cn>.req already exists, even
+    if that request was never signed (e.g. a prior attempt failed at the CA-sign
+    step because of a wrong passphrase or a dropped connection). If no signed
+    certificate exists yet, the dangling request is safe to remove and the build
+    can proceed. If a certificate already exists, surface a clear error instead of
+    silently deleting anything — the caller should renew or import that cert.
+    """
+    issued_path = str(PurePosixPath(pki_dir) / "issued" / f"{common_name}.crt")
+    req_path = str(PurePosixPath(pki_dir) / "reqs" / f"{common_name}.req")
+
+    if await _file_exists_maybe_sudo(executor, issued_path, use_sudo):
+        raise ValidationError(
+            f"A certificate for '{common_name}' already exists in the PKI "
+            f"({issued_path}). Use renew or import instead of generating a new one."
+        )
+
+    if await _file_exists_maybe_sudo(executor, req_path, use_sudo):
+        cmd, stdin_data = _sudo_wrap(executor, ["/bin/rm", "-f", req_path], use_sudo)
+        result = await executor.run_command(cmd, timeout=10.0, stdin_data=stdin_data)
+        result.raise_on_error(f"remove stale request {req_path}")
+
+
 async def build_server_full(
     executor: Executor,
     easyrsa_path: str,
@@ -111,6 +153,8 @@ async def build_server_full(
     _validate_path(easyrsa_path)
     _validate_path(pki_dir)
     _validate_cn(common_name)
+
+    await _clear_stale_request(executor, pki_dir, common_name, use_sudo)
 
     base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", f"--days={expire_days}", "build-server-full", common_name, "nopass")
     app_stdin = f"{ca_passphrase}\n".encode()
@@ -132,6 +176,8 @@ async def build_client_full(
     _validate_path(easyrsa_path)
     _validate_path(pki_dir)
     _validate_cn(common_name)
+
+    await _clear_stale_request(executor, pki_dir, common_name, use_sudo)
 
     base_cmd = _easyrsa(easyrsa_path, pki_dir, "--batch", f"--days={expire_days}", "build-client-full", common_name, "nopass")
     app_stdin = f"{ca_passphrase}\n".encode()
