@@ -10,7 +10,7 @@ from app.db.models.user import User
 from app.db.models.vpn_client import VpnClient
 from app.db.models.vpn_instance import VpnInstance
 from app.db.session import get_db
-from app.dependencies import get_current_operator, get_current_superuser, get_current_user
+from app.dependencies import get_active_role, get_current_operator, get_current_superuser, get_current_user
 from app.schemas.vpn_client import VpnClientCreate, VpnClientRead, VpnClientRevoke, VpnClientUpdate
 from app.services import easyrsa_service, pam_service
 from app.services.client_generator import generate_site_ovpn, generate_user_ovpn
@@ -30,12 +30,13 @@ async def list_clients(
     vpn_instance_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    active_role: str = Depends(get_active_role),
 ) -> list[VpnClientRead]:
     query = select(VpnClient)
     if vpn_instance_id is not None:
         query = query.where(VpnClient.vpn_instance_id == vpn_instance_id)
     # vpn_user role may only view their own clients
-    if current_user.role == "vpn_user":
+    if active_role == "vpn_user":
         query = query.where(VpnClient.name == current_user.username)
     result = await db.execute(query)
     return [VpnClientRead.model_validate(c) for c in result.scalars().all()]
@@ -216,6 +217,7 @@ async def download_ovpn(
     client_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    active_role: str = Depends(get_active_role),
 ) -> Response:
     from app.core.exceptions import ForbiddenError, NotFoundError
 
@@ -223,7 +225,7 @@ async def download_ovpn(
     client = result.scalar_one_or_none()
     if client is None:
         raise NotFoundError(f"Client {client_id} not found")
-    if current_user.role == "vpn_user" and client.name != current_user.username:
+    if active_role == "vpn_user" and client.name != current_user.username:
         raise ForbiddenError("Access denied")
     if client.is_revoked:
         raise ForbiddenError("Cannot download config for a revoked client")

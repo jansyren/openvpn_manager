@@ -17,24 +17,25 @@
           <li><RouterLink :to="{ name: 'routes' }"><i class="pi pi-directions" /> Routes</RouterLink></li>
           <li><RouterLink :to="{ name: 'clients' }"><i class="pi pi-users" /> Clients</RouterLink></li>
           <li><RouterLink :to="{ name: 'certificates' }"><i class="pi pi-verified" /> Certificates</RouterLink></li>
-          <li v-if="authStore.isSuperuser">
+          <li v-if="authStore.canAdminister">
             <RouterLink :to="{ name: 'pam' }"><i class="pi pi-key" /> PAM Users</RouterLink>
           </li>
-          <li v-if="authStore.isSuperuser">
+          <li v-if="authStore.canAdminister">
             <RouterLink :to="{ name: 'easyrsa' }"><i class="pi pi-lock" /> Easy-RSA</RouterLink>
           </li>
           <li><RouterLink :to="{ name: 'backup' }"><i class="pi pi-database" /> Backup</RouterLink></li>
-          <li v-if="authStore.isSuperuser">
+          <li v-if="authStore.canAdminister">
             <RouterLink :to="{ name: 'deploy' }"><i class="pi pi-cloud-upload" /> Deploy</RouterLink>
           </li>
-          <li v-if="authStore.isSuperuser">
+          <li v-if="authStore.canAdminister">
             <RouterLink :to="{ name: 'users' }"><i class="pi pi-users" /> Users</RouterLink>
           </li>
-          <li v-if="authStore.isSuperuser">
+          <li v-if="authStore.canAdminister">
             <RouterLink :to="{ name: 'ldap' }"><i class="pi pi-sitemap" /> Active Directory</RouterLink>
           </li>
         </template>
       </ul>
+      <RoleSwitcher v-if="authStore.roles.length > 1" />
       <div class="sidebar-footer">
         <span class="username">{{ authStore.currentUser?.username }}</span>
         <Button icon="pi pi-sign-out" severity="secondary" text @click="handleLogout" />
@@ -83,6 +84,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
+import RoleSwitcher from '@/components/RoleSwitcher.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useContextStore } from '@/stores/context'
 

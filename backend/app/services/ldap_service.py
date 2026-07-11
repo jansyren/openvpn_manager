@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 # Role priority for determining the highest role from multiple group mappings
-_ROLE_PRIORITY = {"admin": 4, "operator": 3, "viewer": 2, "vpn_user": 1}
+ROLE_PRIORITY = {"admin": 4, "operator": 3, "viewer": 2, "vpn_user": 1}
 
 
 def _make_server(config: "LdapConfig"):
@@ -159,18 +159,33 @@ async def search_group_members(config: "LdapConfig", group_dn: str) -> list[dict
     return await loop.run_in_executor(None, _do_search_group_members, config, group_dn)
 
 
+def _matching_roles(
+    group_dns: list[str],
+    group_mappings: list["LdapGroupRoleMapping"],
+) -> set[str]:
+    """Return the distinct set of roles whose mapped group_dn appears in group_dns."""
+    group_dns_lower = {dn.lower() for dn in group_dns}
+    return {m.role for m in group_mappings if m.group_dn.lower() in group_dns_lower}
+
+
+def pick_primary_role(roles: set[str] | list[str]) -> str | None:
+    """Return the single highest-priority role from an arbitrary set/list of roles."""
+    if not roles:
+        return None
+    return max(roles, key=lambda r: ROLE_PRIORITY.get(r, 0))
+
+
+def determine_all_roles(
+    group_dns: list[str],
+    group_mappings: list["LdapGroupRoleMapping"],
+) -> set[str]:
+    """Return the FULL set of roles matching this user's group memberships."""
+    return _matching_roles(group_dns, group_mappings)
+
+
 def determine_role(
     group_dns: list[str],
     group_mappings: list["LdapGroupRoleMapping"],
 ) -> str | None:
     """Return the highest-priority role for a user given their group memberships."""
-    group_dns_lower = {dn.lower() for dn in group_dns}
-    best_role: str | None = None
-    best_priority = 0
-    for mapping in group_mappings:
-        if mapping.group_dn.lower() in group_dns_lower:
-            p = _ROLE_PRIORITY.get(mapping.role, 0)
-            if p > best_priority:
-                best_priority = p
-                best_role = mapping.role
-    return best_role
+    return pick_primary_role(_matching_roles(group_dns, group_mappings))

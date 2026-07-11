@@ -9,7 +9,7 @@ from app.db.models.user import User
 from app.db.session import get_db
 from app.dependencies import get_current_superuser
 from app.schemas.user_management import UserCreate, UserManagementRead, UserUpdate
-from app.services.auth_service import create_user
+from app.services.auth_service import create_user, persist_user_roles
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -45,6 +45,7 @@ async def create_user_endpoint(
         )
         db.add(user)
         await db.flush()
+        await persist_user_roles(db, user, {body.role})
     else:
         user = await create_user(db, body.username, body.password, body.role, body.is_active)
     return UserManagementRead.model_validate(user)
@@ -81,7 +82,7 @@ async def update_user(
     if body.password is not None:
         user.hashed_password = hash_password(body.password)
     if body.role is not None:
-        user.role = body.role
+        await persist_user_roles(db, user, {body.role})
     if body.is_active is not None:
         user.is_active = body.is_active
 

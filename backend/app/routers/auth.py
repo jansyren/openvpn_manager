@@ -5,10 +5,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import blacklist_token, decode_token
 from app.db.session import get_db
-from app.dependencies import get_client_ip, get_current_user
+from app.dependencies import get_active_role, get_client_ip, get_current_user
 from app.db.models.user import User
-from app.schemas.auth import ChangePasswordRequest, LoginRequest, TokenResponse, UserRead
-from app.services.auth_service import authenticate, change_password, create_tokens, refresh_access_token
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    SwitchRoleRequest,
+    TokenResponse,
+    UserRead,
+)
+from app.services.auth_service import (
+    authenticate,
+    change_password,
+    create_tokens,
+    get_available_roles,
+    refresh_access_token,
+)
 
 from app.config import get_settings
 
@@ -26,7 +38,8 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     user = await authenticate(db, body.username, body.password)
-    tokens = await create_tokens(user)
+    available_roles = await get_available_roles(db, user)
+    tokens = await create_tokens(user, available_roles)
 
     response.set_cookie(
         key=_REFRESH_COOKIE,
@@ -96,8 +109,52 @@ async def refresh(
 
 
 @router.get("/me", response_model=UserRead)
-async def me(current_user: User = Depends(get_current_user)) -> UserRead:
-    return UserRead.model_validate(current_user)
+async def me(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    active_role: str = Depends(get_active_role),
+) -> UserRead:
+    roles = await get_available_roles(db, current_user)
+    return UserRead(
+        id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        is_active=current_user.is_active,
+        is_superuser=current_user.is_superuser,
+        roles=roles,
+        active_role=active_role,
+    )
+
+
+@router.post("/switch-role", response_model=TokenResponse)
+async def switch_role(
+    body: SwitchRoleRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> TokenResponse:
+    from app.core.exceptions import ForbiddenError
+
+    available_roles = await get_available_roles(db, current_user)
+    if body.role not in available_roles:
+        raise ForbiddenError(f"Role '{body.role}' is not available to this user")
+
+    tokens = await create_tokens(current_user, available_roles, active_role=body.role)
+
+    response.set_cookie(
+        key=_REFRESH_COOKIE,
+        value=tokens["refresh_token"],
+        httponly=True,
+        secure=get_settings().is_production,
+        samesite="strict",
+        max_age=_COOKIE_MAX_AGE,
+        path="/api/v1/auth",
+    )
+
+    return TokenResponse(
+        access_token=tokens["access_token"],
+        expires_in=tokens["expires_in"],
+    )
 
 
 @router.put("/me/password")

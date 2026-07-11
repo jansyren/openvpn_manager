@@ -1,7 +1,7 @@
 """Authentication service."""
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AuthError, ForbiddenError
@@ -17,6 +17,42 @@ from app.core.security import (
     verify_password,
 )
 from app.db.models.user import User
+
+
+async def persist_user_roles(db: AsyncSession, user: User, roles: set[str] | list[str]) -> list[str]:
+    """Replace `user`'s rows in user_roles with exactly `roles`, set user.role to the
+    highest-priority role among them, and return the roles sorted highest-priority-first.
+
+    `user` must already have a primary key (flushed/inserted).
+    """
+    from app.db.models.user_role import UserRole
+    from app.services.ldap_service import ROLE_PRIORITY, pick_primary_role
+
+    role_set = set(roles) or {"vpn_user"}
+    user.role = pick_primary_role(role_set) or "vpn_user"
+
+    await db.execute(delete(UserRole).where(UserRole.user_id == user.id))
+    for r in role_set:
+        db.add(UserRole(user_id=user.id, role=r))
+    await db.flush()
+
+    return sorted(role_set, key=lambda r: ROLE_PRIORITY.get(r, 0), reverse=True)
+
+
+async def get_available_roles(db: AsyncSession, user: User) -> list[str]:
+    """Return user's full resolved role set, highest-priority first.
+
+    Falls back to [user.role] if user_roles has no rows yet (defensive; the
+    migration backfill and persist_user_roles should prevent this in practice).
+    """
+    from app.db.models.user_role import UserRole
+    from app.services.ldap_service import ROLE_PRIORITY
+
+    result = await db.execute(select(UserRole.role).where(UserRole.user_id == user.id))
+    roles = {r for (r,) in result.all()}
+    if not roles:
+        return [user.role]
+    return sorted(roles, key=lambda r: ROLE_PRIORITY.get(r, 0), reverse=True)
 
 
 async def authenticate(db: AsyncSession, username: str, password: str) -> User:
@@ -55,14 +91,17 @@ async def authenticate(db: AsyncSession, username: str, password: str) -> User:
 
 
 async def _authenticate_ldap_user(db: AsyncSession, user: User, password: str) -> User:
-    """Verify an existing LDAP user's password via directory bind."""
+    """Verify an existing LDAP user's password via directory bind, and recompute
+    their full role set from a fresh memberOf fetch (roles must never go stale)."""
     from app.db.models.ldap_config import LdapConfig
+    from app.db.models.ldap_group_mapping import LdapGroupRoleMapping
     from app.services import ldap_service
 
     if not user.is_active:
         raise ForbiddenError("Account is disabled")
 
     ldap_cfg: LdapConfig | None = None
+    group_dns: list[str] = []
     if user.ldap_config_id:
         result = await db.execute(select(LdapConfig).where(LdapConfig.id == user.ldap_config_id))
         ldap_cfg = result.scalar_one_or_none()
@@ -73,7 +112,7 @@ async def _authenticate_ldap_user(db: AsyncSession, user: User, password: str) -
         configs = result.scalars().all()
         for cfg in configs:
             try:
-                await ldap_service.authenticate_user(cfg, user.username, password)
+                _user_dn, group_dns = await ldap_service.authenticate_user(cfg, user.username, password)
                 ldap_cfg = cfg
                 break
             except Exception:
@@ -85,12 +124,19 @@ async def _authenticate_ldap_user(db: AsyncSession, user: User, password: str) -
             raise AuthError("Invalid username or password")
     else:
         try:
-            await ldap_service.authenticate_user(ldap_cfg, user.username, password)
+            _user_dn, group_dns = await ldap_service.authenticate_user(ldap_cfg, user.username, password)
         except Exception:
             locked = record_failed_login(user.username)
             if locked:
                 raise AuthError("Account locked due to too many failed login attempts")
             raise AuthError("Invalid username or password")
+
+    mapping_result = await db.execute(
+        select(LdapGroupRoleMapping).where(LdapGroupRoleMapping.ldap_config_id == ldap_cfg.id)
+    )
+    mappings = mapping_result.scalars().all()
+    all_roles = ldap_service.determine_all_roles(group_dns, list(mappings))
+    await persist_user_roles(db, user, all_roles)
 
     clear_failed_logins(user.username)
     user.last_login = datetime.now(UTC)
@@ -113,12 +159,13 @@ async def _try_ldap_jit(db: AsyncSession, username: str, password: str) -> User 
         except Exception:
             continue
 
-        # Determine role from group mappings
+        # Determine roles from group mappings
         mapping_result = await db.execute(
             select(LdapGroupRoleMapping).where(LdapGroupRoleMapping.ldap_config_id == cfg.id)
         )
         mappings = mapping_result.scalars().all()
-        role = ldap_service.determine_role(group_dns, list(mappings)) or "vpn_user"
+        all_roles = ldap_service.determine_all_roles(group_dns, list(mappings))
+        primary = ldap_service.pick_primary_role(all_roles) or "vpn_user"
 
         user = User(
             username=username,
@@ -126,25 +173,39 @@ async def _try_ldap_jit(db: AsyncSession, username: str, password: str) -> User 
             auth_source="ldap",
             ldap_dn=user_dn,
             ldap_config_id=cfg.id,
-            role=role,
+            role=primary,
             is_active=True,
             is_superuser=False,
             last_login=datetime.now(UTC),
         )
         db.add(user)
-        await db.flush()
+        await db.flush()  # need user.id before persist_user_roles
+        await persist_user_roles(db, user, all_roles)
         clear_failed_logins(username)
         return user
 
     return None
 
 
-async def create_tokens(user: User) -> dict:
+async def create_tokens(user: User, available_roles: list[str], active_role: str | None = None) -> dict:
+    """`available_roles` must be highest-priority-first (as returned by get_available_roles).
+    `active_role` defaults to available_roles[0] if None or not a member of available_roles."""
+    if active_role not in available_roles:
+        active_role = available_roles[0]
+
     access_token = create_access_token(
         user.id,
-        additional_claims={"username": user.username, "superuser": user.is_superuser},
+        additional_claims={
+            "username": user.username,
+            "superuser": user.is_superuser,
+            "active_role": active_role,
+            "roles": available_roles,
+        },
     )
-    refresh_token, refresh_expires = create_refresh_token(user.id)
+    refresh_token, refresh_expires = create_refresh_token(
+        user.id,
+        additional_claims={"active_role": active_role, "roles": available_roles},
+    )
     from app.config import get_settings
 
     settings = get_settings()
@@ -159,6 +220,7 @@ async def create_tokens(user: User) -> dict:
 async def refresh_access_token(db: AsyncSession, refresh_token: str) -> dict:
     payload = decode_token(refresh_token, expected_type="refresh")
     user_id = int(payload["sub"])
+    prior_active_role = payload.get("active_role")
 
     result = await db.execute(select(User).where(User.id == user_id))
     user: User | None = result.scalar_one_or_none()
@@ -166,7 +228,8 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> dict:
     if user is None or not user.is_active:
         raise AuthError("User not found or inactive")
 
-    return await create_tokens(user)
+    available_roles = await get_available_roles(db, user)
+    return await create_tokens(user, available_roles, active_role=prior_active_role)
 
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> User:
@@ -217,6 +280,7 @@ async def create_user(
     )
     db.add(user)
     await db.flush()
+    await persist_user_roles(db, user, {role})
     return user
 
 
@@ -229,9 +293,11 @@ async def create_initial_superuser(db: AsyncSession, username: str, password: st
     user = User(
         username=username,
         hashed_password=hash_password(password),
+        role="admin",
         is_active=True,
         is_superuser=True,
     )
     db.add(user)
     await db.flush()
+    await persist_user_roles(db, user, {"admin"})
     return user

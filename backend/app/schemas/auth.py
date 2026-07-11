@@ -39,5 +39,11 @@ class UserRead(BaseModel):
     role: str
     is_active: bool
     is_superuser: bool
+    roles: list[str]
+    active_role: str
 
     model_config = {"from_attributes": True}
+
+
+class SwitchRoleRequest(BaseModel):
+    role: str = Field(..., min_length=1, max_length=16)

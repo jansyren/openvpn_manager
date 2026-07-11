@@ -7,12 +7,14 @@ from app.db.models.pam import PamGroup, PamUser
 from app.db.models.route import Route
 from app.db.models.server import Server
 from app.db.models.user import User
+from app.db.models.user_role import UserRole
 from app.db.models.vpn_client import VpnClient
 from app.db.models.vpn_instance import VpnInstance
 from app.db.models.vpn_instance_ldap_group import VpnInstanceLdapGroup
 
 __all__ = [
     "User",
+    "UserRole",
     "Server",
     "VpnInstance",
     "Route",
