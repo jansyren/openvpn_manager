@@ -42,6 +42,11 @@
         <span class="username">{{ authStore.currentUser?.username }}</span>
         <Button icon="pi pi-sign-out" severity="secondary" text @click="handleLogout" />
       </div>
+      <div class="version-line" :title="versionTooltip">
+        <span>UI {{ appVersion }}</span>
+        <span class="version-sep">·</span>
+        <span>API {{ backendVersion }}</span>
+      </div>
     </nav>
 
     <div class="content-area">
@@ -82,18 +87,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
 import RoleSwitcher from '@/components/RoleSwitcher.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useContextStore } from '@/stores/context'
+import { systemApi } from '@/api/system'
+import { appVersion, gitCommit } from '@/version'
 
 const authStore = useAuthStore()
 const ctx = useContextStore()
 const router = useRouter()
 const route = useRoute()
+
+const backendVersion = ref('…')
+const backendCommit = ref('')
+const versionTooltip = computed(
+  () => `Frontend ${appVersion} (${gitCommit}) · Backend ${backendVersion.value} (${backendCommit.value})`,
+)
 
 const CONTEXT_BAR_EXCLUDED: string[] = [
   'servers',
@@ -128,6 +141,13 @@ async function handleLogout(): Promise<void> {
 
 onMounted(async () => {
   await ctx.init()
+  try {
+    const info = await systemApi.getInfo()
+    backendVersion.value = info.app_version
+    backendCommit.value = info.git_commit
+  } catch {
+    backendVersion.value = 'unknown'
+  }
 })
 </script>
 
@@ -198,6 +218,18 @@ onMounted(async () => {
 .username {
   font-size: 0.8rem;
   color: var(--p-surface-300);
+}
+
+.version-line {
+  display: flex;
+  gap: 0.35rem;
+  padding-top: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--p-surface-400);
+  cursor: default;
+}
+.version-sep {
+  opacity: 0.6;
 }
 
 /* ── Content area ───────────────────────────────────────────── */

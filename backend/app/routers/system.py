@@ -25,11 +25,17 @@ async def health(db: AsyncSession = Depends(get_db)) -> HealthCheck:
 
 @router.get("/info", response_model=SystemInfo)
 async def system_info(_: User = Depends(get_current_user)) -> SystemInfo:
+    from app.config import get_settings
+    from app.version import version_info
+
+    info = version_info()
     return SystemInfo(
-        app_version="0.1.0",
+        app_version=info["version"],
+        git_commit=info["git_commit"],
+        build_time=info["build_time"],
         openvpn_version=None,  # Could query via executor if a local server is configured
         python_version=sys.version,
-        environment="development",
+        environment=get_settings().app_env,
     )
 
 

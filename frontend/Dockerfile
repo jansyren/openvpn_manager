@@ -13,6 +13,10 @@ CMD ["sh", "-c", "npm run type-check && npm run test:unit"]
 # ── Build stage ───────────────────────────────────────────────────────────────
 FROM deps AS build
 
+# Baked into the bundle and shown in the UI (see vite.config.ts / src/version.ts).
+ARG GIT_COMMIT=dev
+ENV GIT_COMMIT=$GIT_COMMIT
+
 COPY . .
 RUN npm run build
 

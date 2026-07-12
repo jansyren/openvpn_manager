@@ -39,6 +39,7 @@
           class="w-full mt-3"
         />
       </form>
+      <p class="version">v{{ appVersion }}</p>
     </div>
   </div>
 </template>
@@ -51,6 +52,7 @@ import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useAuthStore } from '@/stores/auth'
+import { appVersion } from '@/version'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -126,5 +128,12 @@ async function handleLogin(): Promise<void> {
   font-size: 0.875rem;
   font-weight: 500;
   margin-bottom: 0.375rem;
+}
+
+.version {
+  margin: 1.25rem 0 0;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--p-surface-400);
 }
 </style>

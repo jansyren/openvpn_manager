@@ -27,6 +27,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # Surfaced in the UI via /system/info. Set on the host before `up --build`,
+        # e.g. GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     env_file: .env
     # Shared auth state (token blacklist + login lockout) lives in Redis so it
     # survives restarts and is consistent across workers/replicas. This overrides
@@ -50,6 +55,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-dev}
     # TLS is expected to be terminated by an external reverse proxy in front of
     # this service. The nginx image here serves plain HTTP on :80 only.
     ports:

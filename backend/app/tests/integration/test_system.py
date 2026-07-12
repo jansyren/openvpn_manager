@@ -23,7 +23,14 @@ async def test_info_returns_version(client: AsyncClient, superuser, superuser_to
         "/api/v1/system/info", headers={"Authorization": f"Bearer {superuser_token}"}
     )
     assert resp.status_code == 200
-    assert resp.json()["app_version"]
+    body = resp.json()
+    # Version is sourced from the installed package metadata (pyproject version).
+    from app.version import VERSION
+
+    assert body["app_version"] == VERSION
+    assert body["app_version"] != "0.0.0+unknown"
+    assert "git_commit" in body
+    assert "build_time" in body
 
 
 @pytest.mark.asyncio
