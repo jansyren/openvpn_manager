@@ -1,11 +1,8 @@
 <template>
   <div>
-    <div class="page-header">
-      <h1 class="page-title">VPN Clients</h1>
-      <div class="action-btns">
-        <Button label="Add Client" icon="pi pi-plus" :disabled="!ctx.selectedInstanceId" @click="openAddDialog" />
-      </div>
-    </div>
+    <PageHeader title="VPN Clients">
+      <Button label="Add Client" icon="pi pi-plus" :disabled="!ctx.selectedInstanceId" @click="openAddDialog" />
+    </PageHeader>
 
     <Message v-if="!ctx.selectedServerId" severity="info" :closable="false" style="margin-bottom:1rem">
       Select a server and VPN instance in the header bar to manage clients.
@@ -162,7 +159,6 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
-import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -175,11 +171,13 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Message from 'primevue/message'
+import PageHeader from '@/components/PageHeader.vue'
+import { useApiToast } from '@/composables/useApiToast'
 import { useContextStore } from '@/stores/context'
 import { clientsApi } from '@/api/clients'
 import type { VpnClientRead } from '@/types'
 
-const toast = useToast()
+const { toast, error } = useApiToast()
 const confirm = useConfirm()
 const ctx = useContextStore()
 
@@ -222,7 +220,7 @@ async function loadClients() {
   try {
     clients.value = await clientsApi.list(ctx.selectedInstanceId)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load clients', life: 4000 })
+    error(e, 'Failed to load clients')
   } finally {
     loading.value = false
   }
@@ -261,7 +259,7 @@ async function createClient() {
     addDialogVisible.value = false
     await loadClients()
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to create client', life: 4000 })
+    error(e, 'Failed to create client')
   } finally {
     saving.value = false
   }
@@ -271,7 +269,7 @@ async function downloadOvpn(client: VpnClientRead) {
   try {
     await clientsApi.downloadOvpn(client.id, `${client.name}.ovpn`)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to download config', life: 4000 })
+    error(e, 'Failed to download config')
   }
 }
 
@@ -283,7 +281,7 @@ async function verifyPam(client: VpnClientRead) {
       : `User "${result.username}" NOT found in group "${result.group}"`
     toast.add({ severity: result.pam_verified ? 'success' : 'warn', summary: 'PAM Check', detail, life: 5000 })
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'PAM check failed', life: 4000 })
+    error(e, 'PAM check failed')
   }
 }
 
@@ -302,7 +300,7 @@ async function doRevoke() {
     revokeDialogVisible.value = false
     await loadClients()
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to revoke', life: 4000 })
+    error(e, 'Failed to revoke')
   } finally {
     revoking.value = false
   }
@@ -320,7 +318,7 @@ function confirmDelete(client: VpnClientRead) {
         toast.add({ severity: 'success', summary: 'Deleted', detail: 'Client deleted.', life: 3000 })
         await loadClients()
       } catch (e) {
-        toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to delete', life: 4000 })
+        error(e, 'Failed to delete')
       }
     },
   })
@@ -332,17 +330,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1.5rem;
-}
-.page-title {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-}
 .action-btns {
   display: flex;
   gap: 0.5rem;

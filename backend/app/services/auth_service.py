@@ -11,10 +11,10 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
-    hash_password,
+    hash_password_async,
     is_account_locked,
     record_failed_login,
-    verify_password,
+    verify_password_async,
 )
 from app.db.models.user import User
 
@@ -89,7 +89,7 @@ async def authenticate(db: AsyncSession, username: str, password: str) -> User:
             raise AuthError("Account locked due to too many failed login attempts")
         raise AuthError("Invalid username or password")
 
-    if not verify_password(password, user.hashed_password):
+    if not await verify_password_async(password, user.hashed_password):
         locked = record_failed_login(username)
         if locked:
             raise AuthError("Account locked due to too many failed login attempts")
@@ -262,10 +262,10 @@ async def change_password(
     current_token_jti: str,
     current_token_exp: datetime,
 ) -> None:
-    if not verify_password(current_password, user.hashed_password):
+    if not await verify_password_async(current_password, user.hashed_password):
         raise AuthError("Current password is incorrect")
 
-    user.hashed_password = hash_password(new_password)
+    user.hashed_password = await hash_password_async(new_password)
     await db.flush()
 
     # Invalidate the current token
@@ -287,7 +287,7 @@ async def create_user(
 
     user = User(
         username=username,
-        hashed_password=hash_password(password),
+        hashed_password=await hash_password_async(password),
         role=role,
         is_active=is_active,
         is_superuser=False,
@@ -306,7 +306,7 @@ async def create_initial_superuser(db: AsyncSession, username: str, password: st
 
     user = User(
         username=username,
-        hashed_password=hash_password(password),
+        hashed_password=await hash_password_async(password),
         role="admin",
         is_active=True,
         is_superuser=True,

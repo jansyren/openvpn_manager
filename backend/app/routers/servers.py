@@ -6,7 +6,7 @@ from app.db.session import get_db
 from app.dependencies import get_current_superuser, get_current_user
 from app.schemas.server import ServerCreate, ServerRead, ServerTestConnectionResult, ServerUpdate
 from app.schemas.vpn_instance import DiscoveredConfig
-from app.services import server_service
+from app.services import audit_service, server_service
 
 router = APIRouter(prefix="/servers", tags=["servers"])
 
@@ -24,9 +24,13 @@ async def list_servers(
 async def create_server(
     body: ServerCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_superuser),
 ) -> ServerRead:
     server = await server_service.create_server(db, body)
+    await audit_service.record(
+        db, user_id=current_user.id, action="server.create",
+        resource_type="server", resource_id=server.id, detail={"name": server.name},
+    )
     return ServerRead.from_server(server)
 
 
@@ -55,9 +59,13 @@ async def update_server(
 async def delete_server(
     server_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_superuser),
 ) -> None:
     await server_service.delete_server(db, server_id)
+    await audit_service.record(
+        db, user_id=current_user.id, action="server.delete",
+        resource_type="server", resource_id=server_id,
+    )
 
 
 @router.post("/{server_id}/test-connection", response_model=ServerTestConnectionResult)

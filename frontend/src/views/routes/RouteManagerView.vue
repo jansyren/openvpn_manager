@@ -1,19 +1,16 @@
 <template>
   <div>
-    <div class="page-header">
-      <h1 class="page-title">Route Manager</h1>
-      <div class="action-btns">
-        <Button
-          label="Show Live Routing Table"
-          icon="pi pi-table"
-          severity="secondary"
-          :loading="liveLoading"
-          :disabled="!ctx.selectedServerId"
-          @click="loadLiveRoutes"
-        />
-        <Button label="Add Route" icon="pi pi-plus" @click="openAddDialog" />
-      </div>
-    </div>
+    <PageHeader title="Route Manager">
+      <Button
+        label="Show Live Routing Table"
+        icon="pi pi-table"
+        severity="secondary"
+        :loading="liveLoading"
+        :disabled="!ctx.selectedServerId"
+        @click="loadLiveRoutes"
+      />
+      <Button label="Add Route" icon="pi pi-plus" @click="openAddDialog" />
+    </PageHeader>
 
     <Message v-if="!ctx.selectedServerId" severity="info" :closable="false" style="margin-bottom:1rem">
       Select a server in the header bar to view routes.
@@ -118,7 +115,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -131,11 +127,13 @@ import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Panel from 'primevue/panel'
 import Message from 'primevue/message'
+import PageHeader from '@/components/PageHeader.vue'
+import { useApiToast } from '@/composables/useApiToast'
 import { useContextStore } from '@/stores/context'
 import { routesApi } from '@/api/routes'
 import type { RouteRead, LiveRoutingTable } from '@/types'
 
-const toast = useToast()
+const { toast, error } = useApiToast()
 const confirm = useConfirm()
 const ctx = useContextStore()
 
@@ -177,7 +175,7 @@ async function loadRoutes() {
   try {
     routes.value = await routesApi.list(ctx.selectedServerId ?? undefined)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load routes', life: 4000 })
+    error(e, 'Failed to load routes')
   } finally {
     loading.value = false
   }
@@ -189,7 +187,7 @@ async function loadLiveRoutes() {
   try {
     liveRoutes.value = await routesApi.getLive(ctx.selectedServerId)
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to load live routes', life: 4000 })
+    error(e, 'Failed to load live routes')
   } finally {
     liveLoading.value = false
   }
@@ -226,7 +224,7 @@ async function createRoute() {
     addDialogVisible.value = false
     await loadRoutes()
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to create route', life: 4000 })
+    error(e, 'Failed to create route')
   } finally {
     saving.value = false
   }
@@ -239,7 +237,7 @@ async function applyRoute(route: RouteRead) {
     toast.add({ severity: 'success', summary: 'Applied', detail: 'Route applied.', life: 3000 })
     await loadRoutes()
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to apply route', life: 4000 })
+    error(e, 'Failed to apply route')
   } finally {
     applyingId.value = null
   }
@@ -252,7 +250,7 @@ async function removeRoute(route: RouteRead) {
     toast.add({ severity: 'success', summary: 'Removed', detail: 'Route deactivated.', life: 3000 })
     await loadRoutes()
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to remove route', life: 4000 })
+    error(e, 'Failed to remove route')
   } finally {
     applyingId.value = null
   }
@@ -270,7 +268,7 @@ function confirmDelete(route: RouteRead) {
         toast.add({ severity: 'success', summary: 'Deleted', detail: 'Route deleted.', life: 3000 })
         await loadRoutes()
       } catch (e) {
-        toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to delete', life: 4000 })
+        error(e, 'Failed to delete')
       }
     },
   })
@@ -282,21 +280,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1.5rem;
-}
-.page-title {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-}
-.action-btns {
-  display: flex;
-  gap: 0.5rem;
-}
 .live-panel {
   margin-bottom: 1.5rem;
 }

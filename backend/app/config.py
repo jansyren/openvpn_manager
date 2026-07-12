@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     max_failed_login_attempts: int = 5
     lockout_duration_minutes: int = 10
 
+    # Optional Redis for shared auth state (token blacklist + login lockout).
+    # When set, blacklist/lockout are stored in Redis so they survive restarts
+    # and are shared across workers/replicas. Unset → in-memory (single worker).
+    redis_url: str | None = None
+
     # Initial admin (created on first startup if set)
     app_admin_username: str | None = None
     app_admin_password: str | None = None

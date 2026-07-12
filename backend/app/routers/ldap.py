@@ -27,8 +27,7 @@ from app.schemas.ldap import (
     VpnInstanceLdapGroupCreate,
     VpnInstanceLdapGroupRead,
 )
-from app.services import ldap_auth_plugin, ldap_service
-from app.services.auth_service import persist_user_roles
+from app.services import ldap_auth_plugin, ldap_service, ldap_sync_service
 from app.services.server_service import get_executor, get_server
 
 router = APIRouter(prefix="/ldap", tags=["ldap"])
@@ -284,165 +283,12 @@ async def sync_ldap_users(
 ) -> LdapSyncResult:
     """Sync members of the configured LDAP groups to VPN clients for this instance.
 
-    For each LDAP group member:
-    - Creates a User record (role=vpn_user, auth_source=ldap) if absent
-    - Creates a VpnClient record if absent
-    - Issues a certificate if the instance PKI is configured and a CA passphrase is available
+    For each LDAP group member: create the User (auth_source=ldap) if absent,
+    create the VpnClient if absent, and issue a certificate when the instance PKI
+    is configured and a CA passphrase is available. Orchestration lives in
+    `ldap_sync_service.sync_instance_users`.
     """
-    from app.core.security import decrypt_ca_passphrase
-    from app.services import easyrsa_service
-
-    instance = await _get_instance_or_404(db, instance_id)
-    if not instance.ldap_config_id:
-        raise ValidationError("No LDAP config assigned to this VPN instance.")
-
-    ldap_cfg = await _get_config_or_404(db, instance.ldap_config_id)
-
-    # Load LDAP groups for this instance
-    grp_result = await db.execute(
-        select(VpnInstanceLdapGroup).where(VpnInstanceLdapGroup.vpn_instance_id == instance_id)
-    )
-    ldap_groups = grp_result.scalars().all()
-    if not ldap_groups:
-        raise ValidationError("No LDAP groups configured for this VPN instance.")
-
-    # PKI / cert issuing setup
-    pki_dir = instance.pki_dir or "/etc/easy-rsa/pki"
-    easyrsa_server_id = instance.easyrsa_server_id or instance.server_id
-    vpn_server = await get_server(db, instance.server_id)
-    easyrsa_server = await get_server(db, easyrsa_server_id)
-    easyrsa_executor = get_executor(easyrsa_server)
-
-    ca_passphrase: str | None = None
-    if instance.ca_passphrase_encrypted_blob:
-        ca_passphrase = decrypt_ca_passphrase(instance.ca_passphrase_encrypted_blob)
-    has_pki = bool(instance.easyrsa_path and instance.pki_dir)
-
-    # Group role mappings (for all LDAP configs — or just this config)
-    mapping_result = await db.execute(
-        select(LdapGroupRoleMapping).where(LdapGroupRoleMapping.ldap_config_id == ldap_cfg.id)
-    )
-    group_mappings = mapping_result.scalars().all()
-
-    users_created = 0
-    clients_created = 0
-    certs_issued = 0
-    skipped = 0
-    failed: list[str] = []
-
-    # First pass: gather members across all configured groups for this instance,
-    # accumulating every group DN a username was found in (a user may be a member
-    # of more than one configured group, and needs the full set to resolve role).
-    accumulated: dict[str, dict] = {}
-    for ldap_group in ldap_groups:
-        try:
-            members = await ldap_service.search_group_members(ldap_cfg, ldap_group.group_dn)
-        except Exception as exc:
-            failed.append(f"Group {ldap_group.group_dn}: {exc}")
-            continue
-
-        for member in members:
-            entry = accumulated.setdefault(member["username"], {**member, "group_dns": set()})
-            entry["group_dns"].add(ldap_group.group_dn)
-
-    # Second pass: resolve role from each member's full accumulated group_dns
-    # (only reflects membership among groups configured for this instance; the
-    # user's first real login re-fetches their true full memberOf and self-corrects).
-    for username, member in accumulated.items():
-        try:
-            # ── Ensure User record ───────────────────────────────────────
-            user_result = await db.execute(select(User).where(User.username == username))
-            user = user_result.scalar_one_or_none()
-            if user is None:
-                all_roles = ldap_service.determine_all_roles(list(member["group_dns"]), list(group_mappings))
-                role = ldap_service.pick_primary_role(all_roles) or "vpn_user"
-                user = User(
-                    username=username,
-                    hashed_password="!ldap",
-                    auth_source="ldap",
-                    ldap_dn=member.get("dn"),
-                    ldap_config_id=ldap_cfg.id,
-                    role=role,
-                    is_active=True,
-                    is_superuser=False,
-                )
-                db.add(user)
-                await db.flush()
-                await persist_user_roles(db, user, all_roles)
-                users_created += 1
-
-            # ── Ensure VpnClient record ──────────────────────────────────
-            client_result = await db.execute(
-                select(VpnClient).where(
-                    VpnClient.vpn_instance_id == instance_id,
-                    VpnClient.name == username,
-                )
-            )
-            client = client_result.scalar_one_or_none()
-            if client is not None:
-                skipped += 1
-                continue
-
-            # Issue certificate if PKI is available
-            cert_serial: str | None = None
-            not_before = not_after = None
-            if has_pki and ca_passphrase:
-                try:
-                    await easyrsa_service.build_client_full(
-                        easyrsa_executor,
-                        instance.easyrsa_path,
-                        pki_dir,
-                        username,
-                        ca_passphrase,
-                        use_sudo=instance.easyrsa_use_sudo,
-                        expire_days=825,
-                    )
-                    cert_pem = await easyrsa_service.read_cert(
-                        easyrsa_executor, pki_dir, username, use_sudo=instance.easyrsa_use_sudo
-                    )
-                    info = easyrsa_service.parse_cert_info(cert_pem)
-                    cert_serial = info.get("serial")
-                    not_before = info.get("not_before")
-                    not_after = info.get("not_after")
-                    if cert_serial:
-                        from app.db.models.certificate import Certificate
-                        cert_record = Certificate(
-                            vpn_instance_id=instance_id,
-                            common_name=username,
-                            serial=cert_serial,
-                            cert_type="client",
-                            not_before=not_before,
-                            not_after=not_after,
-                            is_revoked=False,
-                        )
-                        db.add(cert_record)
-                    certs_issued += 1
-                except Exception as cert_exc:
-                    failed.append(f"{username} cert: {cert_exc}")
-
-            client = VpnClient(
-                vpn_instance_id=instance_id,
-                name=username,
-                client_type="user",
-                email=member.get("email"),
-                cert_serial=cert_serial,
-                is_revoked=False,
-                created_by=_current_user.id,
-            )
-            db.add(client)
-            await db.flush()
-            clients_created += 1
-
-        except Exception as exc:
-            failed.append(f"{username}: {exc}")
-
-    return LdapSyncResult(
-        users_created=users_created,
-        clients_created=clients_created,
-        certs_issued=certs_issued,
-        skipped=skipped,
-        failed=failed,
-    )
+    return await ldap_sync_service.sync_instance_users(db, instance_id, _current_user.id)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

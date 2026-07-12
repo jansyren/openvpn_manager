@@ -1,14 +1,13 @@
 <template>
   <div>
-    <div class="page-header">
-      <h1 class="page-title">Servers</h1>
+    <PageHeader title="Servers">
       <Button
         v-if="authStore.canAdminister"
         label="Add Server"
         icon="pi pi-plus"
         @click="$router.push({ name: 'servers-new' })"
       />
-    </div>
+    </PageHeader>
 
     <DataTable
       :value="serversStore.servers"
@@ -76,7 +75,8 @@ import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import ConfirmDialog from 'primevue/confirmdialog'
 import { useConfirm } from 'primevue/useconfirm'
-import { useToast } from 'primevue/usetoast'
+import PageHeader from '@/components/PageHeader.vue'
+import { useApiToast } from '@/composables/useApiToast'
 import { useServersStore } from '@/stores/servers'
 import { useAuthStore } from '@/stores/auth'
 import type { ServerRead } from '@/types'
@@ -84,7 +84,7 @@ import type { ServerRead } from '@/types'
 const serversStore = useServersStore()
 const authStore = useAuthStore()
 const confirm = useConfirm()
-const toast = useToast()
+const { error, success } = useApiToast()
 
 onMounted(() => serversStore.fetchAll())
 
@@ -97,9 +97,9 @@ function confirmDelete(server: ServerRead): void {
     accept: async () => {
       try {
         await serversStore.remove(server.id)
-        toast.add({ severity: 'success', summary: 'Deleted', detail: `Server "${server.name}" deleted`, life: 3000 })
+        success(`Server "${server.name}" deleted`, 'Deleted')
       } catch (e: unknown) {
-        toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Delete failed', life: 5000 })
+        error(e, 'Delete failed')
       }
     },
   })
@@ -107,7 +107,5 @@ function confirmDelete(server: ServerRead): void {
 </script>
 
 <style scoped>
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-.page-title { margin: 0; font-size: 1.5rem; font-weight: 700; }
 .action-btns { display: flex; gap: 0.25rem; }
 </style>

@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import os
 import time
@@ -5,6 +6,7 @@ from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import anyio
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -22,6 +24,26 @@ _BLACKLIST_MAX_SIZE = 10_000
 # In-memory lockout tracker: username → (fail_count, locked_until_ts)
 _LOCKOUT_TRACKER: dict[str, tuple[int, float]] = {}
 
+# Lazily-created Redis client (only when REDIS_URL is configured). When present,
+# the token blacklist and login-lockout live in Redis so they survive restarts
+# and are shared across workers/replicas; otherwise the in-memory dicts above are
+# used (correct only for a single worker). Redis errors fail open (fall back to
+# in-memory) so a Redis outage never locks everyone out.
+_redis_client: Any = None
+_redis_resolved = False
+
+
+def _get_redis() -> Any:
+    global _redis_client, _redis_resolved
+    if not _redis_resolved:
+        _redis_resolved = True
+        url = get_settings().redis_url
+        if url:
+            import redis
+
+            _redis_client = redis.Redis.from_url(url, decode_responses=True, socket_timeout=2)
+    return _redis_client
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
@@ -29,6 +51,15 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+async def hash_password_async(password: str) -> str:
+    """bcrypt (~100ms at rounds=12) off the event loop, for use in async handlers."""
+    return await anyio.to_thread.run_sync(hash_password, password)
+
+
+async def verify_password_async(plain: str, hashed: str) -> bool:
+    return await anyio.to_thread.run_sync(verify_password, plain, hashed)
 
 
 def _prune_blacklist() -> None:
@@ -42,11 +73,25 @@ def _prune_blacklist() -> None:
 
 
 def blacklist_token(jti: str, expires_at: datetime) -> None:
+    if not jti:
+        return
+    r = _get_redis()
+    if r is not None:
+        ttl = max(1, int(expires_at.timestamp() - time.time()))
+        with contextlib.suppress(Exception):
+            r.setex(f"bl:{jti}", ttl, "1")
+            return
     _prune_blacklist()
     _TOKEN_BLACKLIST[jti] = expires_at.timestamp()
 
 
 def is_token_blacklisted(jti: str) -> bool:
+    if not jti:
+        return False
+    r = _get_redis()
+    if r is not None:
+        with contextlib.suppress(Exception):
+            return bool(r.exists(f"bl:{jti}"))
     _prune_blacklist()
     return jti in _TOKEN_BLACKLIST
 
@@ -114,6 +159,20 @@ def decode_token(token: str, expected_type: str = "access") -> dict[str, Any]:
 def record_failed_login(username: str) -> bool:
     """Returns True if the account is now locked."""
     settings = get_settings()
+    r = _get_redis()
+    if r is not None:
+        with contextlib.suppress(Exception):
+            if r.exists(f"lock:{username}"):
+                return True
+            count = r.incr(f"fail:{username}")
+            # Bound the fail counter's lifetime so it can't accumulate forever.
+            r.expire(f"fail:{username}", settings.lockout_duration_minutes * 60)
+            if count >= settings.max_failed_login_attempts:
+                r.setex(f"lock:{username}", settings.lockout_duration_minutes * 60, "1")
+                r.delete(f"fail:{username}")
+                return True
+            return False
+
     now = time.time()
     count, locked_until = _LOCKOUT_TRACKER.get(username, (0, 0.0))
 
@@ -131,6 +190,11 @@ def record_failed_login(username: str) -> bool:
 
 
 def is_account_locked(username: str) -> bool:
+    r = _get_redis()
+    if r is not None:
+        with contextlib.suppress(Exception):
+            return bool(r.exists(f"lock:{username}"))
+
     now = time.time()
     _, locked_until = _LOCKOUT_TRACKER.get(username, (0, 0.0))
     if locked_until > now:
@@ -139,6 +203,11 @@ def is_account_locked(username: str) -> bool:
 
 
 def clear_failed_logins(username: str) -> None:
+    r = _get_redis()
+    if r is not None:
+        with contextlib.suppress(Exception):
+            r.delete(f"fail:{username}", f"lock:{username}")
+            return
     _LOCKOUT_TRACKER.pop(username, None)
 
 
