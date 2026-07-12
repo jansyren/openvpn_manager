@@ -33,7 +33,7 @@ def test_password_hashes_are_unique():
 
 def test_compute_sha256():
     digest = compute_sha256(b"hello world")
-    assert digest == "b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576a9600c9ce60b8b26"[:64]
+    assert digest == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
     # Correct value
     import hashlib
     assert compute_sha256(b"hello world") == hashlib.sha256(b"hello world").hexdigest()

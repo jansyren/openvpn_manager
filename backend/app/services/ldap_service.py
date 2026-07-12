@@ -7,6 +7,8 @@ event loop.
 import asyncio
 from typing import TYPE_CHECKING
 
+from ldap3.utils.conv import escape_filter_chars
+
 from app.core.security import decrypt_ldap_password
 
 if TYPE_CHECKING:
@@ -57,16 +59,34 @@ def _do_test_connection(config: "LdapConfig") -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _build_user_filter(config: "LdapConfig", username: str) -> str:
+    """Build the LDAP search filter for a login username.
+
+    The user-supplied ``username`` is escaped per RFC 4515 via
+    ``escape_filter_chars`` to prevent LDAP filter injection (e.g. a username
+    such as ``*)(uid=*``). The admin-configured ``user_filter`` and
+    ``username_attr`` are trusted and are intentionally NOT escaped.
+    """
+    safe_username = escape_filter_chars(username)
+    return f"(&{config.user_filter}({config.username_attr}={safe_username}))"
+
+
 def _do_authenticate(
     config: "LdapConfig", username: str, password: str
 ) -> tuple[str, list[str]]:
     """Return (user_dn, group_dn_list) or raise ValueError."""
     from ldap3 import Connection, SUBTREE
 
+    # Reject empty/whitespace-only passwords before doing anything else: many
+    # directories treat a bind with an empty password as an anonymous bind that
+    # SUCCEEDS, which would be an authentication bypass.
+    if not password or not password.strip():
+        raise ValueError(f"Password verification failed for '{username}'")
+
     conn = _bind_service_account(config)
     server = conn.server
 
-    search_filter = f"(&{config.user_filter}({config.username_attr}={username}))"
+    search_filter = _build_user_filter(config, username)
     conn.search(
         config.user_search_base,
         search_filter,

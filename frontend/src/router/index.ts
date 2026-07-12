@@ -91,6 +91,7 @@ const router = createRouter({
           path: 'backup',
           name: 'backup',
           component: () => import('@/views/backup/BackupRestoreView.vue'),
+          meta: { requiresAdmin: true },
         },
         // Deploy
         {

@@ -23,7 +23,9 @@
           <li v-if="authStore.canAdminister">
             <RouterLink :to="{ name: 'easyrsa' }"><i class="pi pi-lock" /> Easy-RSA</RouterLink>
           </li>
-          <li><RouterLink :to="{ name: 'backup' }"><i class="pi pi-database" /> Backup</RouterLink></li>
+          <li v-if="authStore.canAdminister">
+            <RouterLink :to="{ name: 'backup' }"><i class="pi pi-database" /> Backup</RouterLink>
+          </li>
           <li v-if="authStore.canAdminister">
             <RouterLink :to="{ name: 'deploy' }"><i class="pi pi-cloud-upload" /> Deploy</RouterLink>
           </li>
