@@ -3,11 +3,11 @@
     <div class="page-header">
       <h1 class="page-title">Users</h1>
       <div class="action-btns">
-        <Button label="Add User" icon="pi pi-plus" @click="openAddDialog" />
+        <Button v-if="authStore.canAdminister" label="Add User" icon="pi pi-plus" @click="openAddDialog" />
       </div>
     </div>
 
-    <DataTable :value="users" :loading="loading" striped-rows>
+    <DataTable :value="users" :loading="loading" striped-rows :row-class="rowClass">
       <template #empty>No users found.</template>
       <Column field="username" header="Username" />
       <Column header="Source">
@@ -51,6 +51,7 @@
             @click="openPreviewDialog(data)"
           />
           <Button
+            v-if="authStore.canAdminister"
             icon="pi pi-pencil"
             text
             rounded
@@ -62,8 +63,8 @@
             severity="danger"
             text
             rounded
-            v-tooltip="'Delete'"
-            :disabled="data.id === currentUser?.id"
+            v-tooltip="canDelete(data) ? 'Delete' : 'Operators may only delete vpn_user accounts'"
+            :disabled="!canDelete(data)"
             @click="confirmDelete(data)"
           />
         </template>
@@ -331,6 +332,19 @@ function roleSeverity(role: string): string {
   if (role === 'operator') return 'warn'
   if (role === 'vpn_user') return 'success'
   return 'info'
+}
+
+// Operators (not admins) can only delete vpn_user accounts, never their own.
+function canDelete(user: UserManagementRead): boolean {
+  if (user.id === currentUser?.id) return false
+  if (authStore.canAdminister) return true
+  return user.role === 'vpn_user'
+}
+
+// Operators have no available actions on non-vpn_user accounts (no edit, limited
+// delete) — gray those rows out so it's visually clear they're admin-only.
+function rowClass(data: UserManagementRead) {
+  return { 'row-disabled': !authStore.canAdminister && data.role !== 'vpn_user' }
 }
 
 async function loadUsers() {
@@ -630,6 +644,9 @@ onMounted(async () => {
 .action-btns {
   display: flex;
   gap: 0.5rem;
+}
+:deep(.row-disabled) {
+  opacity: 0.5;
 }
 .field {
   margin-bottom: 1rem;

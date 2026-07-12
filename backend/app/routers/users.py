@@ -1,4 +1,5 @@
-"""User management router (admin only)."""
+"""User management router. Listing/reading and vpn_user-only deletion are available
+to operators; creating users and changing anyone's role remain admin-only."""
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +8,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.security import hash_password
 from app.db.models.user import User
 from app.db.session import get_db
-from app.dependencies import get_current_superuser
+from app.dependencies import get_active_role, get_current_operator, get_current_superuser
 from app.schemas.user_management import UserCreate, UserManagementRead, UserUpdate
 from app.services.auth_service import create_user, persist_user_roles
 
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.get("", response_model=list[UserManagementRead])
 async def list_users(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_superuser),
+    _: User = Depends(get_current_operator),
 ) -> list[UserManagementRead]:
     result = await db.execute(select(User).order_by(User.id))
     return [UserManagementRead.model_validate(u) for u in result.scalars().all()]
@@ -55,7 +56,7 @@ async def create_user_endpoint(
 async def get_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_superuser),
+    _: User = Depends(get_current_operator),
 ) -> UserManagementRead:
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -94,7 +95,8 @@ async def update_user(
 async def delete_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_operator),
+    active_role: str = Depends(get_active_role),
 ) -> None:
     if user_id == current_user.id:
         raise ForbiddenError("Cannot delete your own account")
@@ -103,6 +105,10 @@ async def delete_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise NotFoundError(f"User {user_id} not found")
+
+    is_admin = current_user.is_superuser or active_role == "admin"
+    if not is_admin and user.role != "vpn_user":
+        raise ForbiddenError("Operators may only delete vpn_user accounts")
 
     await db.delete(user)
     await db.flush()

@@ -27,7 +27,7 @@
           <li v-if="authStore.canAdminister">
             <RouterLink :to="{ name: 'deploy' }"><i class="pi pi-cloud-upload" /> Deploy</RouterLink>
           </li>
-          <li v-if="authStore.canAdminister">
+          <li v-if="authStore.canOperate">
             <RouterLink :to="{ name: 'users' }"><i class="pi pi-users" /> Users</RouterLink>
           </li>
           <li v-if="authStore.canAdminister">
