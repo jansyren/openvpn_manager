@@ -2,7 +2,7 @@
   <div>
     <div class="page-header">
       <h1 class="page-title">Backup & Restore</h1>
-      <Button label="Create Backup" icon="pi pi-plus" @click="openCreateDialog" />
+      <Button v-if="authStore.canAdminister" label="Create Backup" icon="pi pi-plus" @click="openCreateDialog" />
     </div>
 
     <DataTable :value="backups" :loading="loading" striped-rows show-gridlines>
@@ -27,8 +27,8 @@
         <template #body="{ data }">
           <div class="action-btns">
             <Button icon="pi pi-download" size="small" severity="secondary" text @click="downloadBackup(data)" />
-            <Button icon="pi pi-history" size="small" severity="warn" text @click="openRestoreDialog(data)" />
-            <Button icon="pi pi-trash" size="small" severity="danger" text @click="confirmDelete(data)" />
+            <Button v-if="authStore.canAdminister" icon="pi pi-history" size="small" severity="warn" text @click="openRestoreDialog(data)" />
+            <Button v-if="authStore.canAdminister" icon="pi pi-trash" size="small" severity="danger" text @click="confirmDelete(data)" />
           </div>
         </template>
       </Column>
@@ -114,12 +114,14 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import apiClient from '@/api/client'
 import { useServersStore } from '@/stores/servers'
+import { useAuthStore } from '@/stores/auth'
 import { vpnInstancesApi } from '@/api/vpnInstances'
 import type { BackupRead, VpnInstanceRead } from '@/types'
 
 const toast = useToast()
 const confirm = useConfirm()
 const serversStore = useServersStore()
+const authStore = useAuthStore()
 
 const backups = ref<BackupRead[]>([])
 const loading = ref(false)

@@ -17,7 +17,7 @@ class User(Base, TimestampMixin):
     # Local "break-glass" superuser flag only; LDAP admins pass authorization via
     # active_role == "admin" instead (see dependencies.get_current_superuser).
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    role: Mapped[str] = mapped_column(String(16), default="admin", nullable=False, server_default="admin")
+    role: Mapped[str] = mapped_column(String(16), default="vpn_user", nullable=False, server_default="vpn_user")
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failed_logins: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

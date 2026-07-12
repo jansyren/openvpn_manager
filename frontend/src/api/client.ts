@@ -5,7 +5,7 @@
  * - Request-ID header
  * - Error normalisation
  */
-import axios, { type AxiosInstance, type InternalAxiosRequestConfig, AxiosResponse } from 'axios'
+import axios, { type AxiosInstance, type InternalAxiosRequestConfig, type AxiosResponse } from 'axios'
 
 let _accessToken: string | null = null
 let _refreshPromise: Promise<string> | null = null

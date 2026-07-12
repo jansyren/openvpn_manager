@@ -51,6 +51,7 @@ async def superuser(db_session: AsyncSession) -> User:
     user = User(
         username="admin",
         hashed_password=hash_password("Admin123!"),
+        role="admin",
         is_active=True,
         is_superuser=True,
     )
@@ -64,6 +65,7 @@ async def regular_user(db_session: AsyncSession) -> User:
     user = User(
         username="user",
         hashed_password=hash_password("User123!"),
+        role="viewer",
         is_active=True,
         is_superuser=False,
     )

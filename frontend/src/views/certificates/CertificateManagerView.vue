@@ -48,6 +48,7 @@
             @click="openRenewDialog(data)"
           />
           <Button
+            v-if="authStore.canAdminister"
             icon="pi pi-ban"
             severity="warn"
             text
@@ -114,11 +115,13 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Message from 'primevue/message'
 import { useContextStore } from '@/stores/context'
+import { useAuthStore } from '@/stores/auth'
 import { certificatesApi } from '@/api/certificates'
 import type { CertificateRead } from '@/types'
 
 const toast = useToast()
 const ctx = useContextStore()
+const authStore = useAuthStore()
 
 const certificates = ref<CertificateRead[]>([])
 const loading = ref(false)
