@@ -444,11 +444,13 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import { vpnInstancesApi } from '@/api/vpnInstances'
 import { ldapApi } from '@/api/ldap'
+import { useContextStore } from '@/stores/context'
 import type { VpnInstanceRead, VpnInstanceStatus, ServiceAction, DirectiveSpec, VpnInstanceLdapGroupRead, LdapConfigRead, LdapSyncResult, LdapDeployResult } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const ctx = useContextStore()
 
 const instanceId = Number(route.params.id)
 const instance = ref<VpnInstanceRead | null>(null)
@@ -761,6 +763,9 @@ async function saveSettings() {
       ldap_config_id: settingsLdapConfigId.value,
     })
     toast.add({ severity: 'success', summary: 'Saved', detail: 'Settings updated.', life: 3000 })
+    if (ctx.selectedServerId === instance.value?.server_id) {
+      await ctx.refreshInstances()
+    }
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to save settings', life: 4000 })
   } finally {

@@ -197,6 +197,7 @@ import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import { useServersStore } from '@/stores/servers'
+import { useContextStore } from '@/stores/context'
 import { serversApi } from '@/api/servers'
 import { vpnInstancesApi } from '@/api/vpnInstances'
 import type { VpnInstanceRead, DiscoveredConfig } from '@/types'
@@ -205,6 +206,7 @@ const router = useRouter()
 const toast = useToast()
 const confirm = useConfirm()
 const serversStore = useServersStore()
+const ctx = useContextStore()
 
 const instances = ref<VpnInstanceRead[]>([])
 const loading = ref(false)
@@ -314,6 +316,7 @@ async function createInstance() {
     toast.add({ severity: 'success', summary: 'Created', detail: 'VPN instance created.', life: 3000 })
     addDialogVisible.value = false
     await loadInstances()
+    await ctx.refreshInstances()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to create instance', life: 4000 })
   } finally {
@@ -332,6 +335,7 @@ function confirmDelete(instance: VpnInstanceRead) {
         await vpnInstancesApi.delete(instance.id)
         toast.add({ severity: 'success', summary: 'Deleted', detail: 'Instance deleted.', life: 3000 })
         await loadInstances()
+        await ctx.refreshInstances()
       } catch (e) {
         toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to delete', life: 4000 })
       }
@@ -367,6 +371,7 @@ async function saveEdit() {
     toast.add({ severity: 'success', summary: 'Saved', detail: 'Instance updated.', life: 3000 })
     editDialogVisible.value = false
     await loadInstances()
+    await ctx.refreshInstances()
   } catch (e) {
     toast.add({ severity: 'error', summary: 'Error', detail: (e as { detail?: string }).detail ?? 'Failed to update', life: 4000 })
   } finally {

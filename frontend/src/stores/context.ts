@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { serversApi } from '@/api/servers'
 import { vpnInstancesApi } from '@/api/vpnInstances'
-import type { ServerRead, VpnInstanceRead } from '@/types'
+import { useServersStore } from '@/stores/servers'
+import type { VpnInstanceRead } from '@/types'
 
 const KEY_SERVER = 'ctx_server_id'
 const KEY_INSTANCE = 'ctx_instance_id'
@@ -15,7 +15,11 @@ function readStoredId(key: string): number | null {
 }
 
 export const useContextStore = defineStore('context', () => {
-  const servers = ref<ServerRead[]>([])
+  const serversStore = useServersStore()
+  // Servers are owned by stores/servers.ts; read reactively from there instead of
+  // keeping an independent copy, so server add/edit/delete elsewhere in the app is
+  // reflected here immediately instead of only after a full page reload.
+  const servers = computed(() => serversStore.servers)
   const instances = ref<VpnInstanceRead[]>([])
   const selectedServerId = ref<number | null>(readStoredId(KEY_SERVER))
   const selectedInstanceId = ref<number | null>(readStoredId(KEY_INSTANCE))
@@ -36,15 +40,27 @@ export const useContextStore = defineStore('context', () => {
     instances.value.find((i) => i.id === selectedInstanceId.value) ?? null,
   )
 
+  async function refreshInstances() {
+    if (!selectedServerId.value) {
+      instances.value = []
+      return
+    }
+    try {
+      instances.value = await vpnInstancesApi.list(selectedServerId.value)
+    } catch {
+      // non-fatal
+    }
+  }
+
   async function init() {
     try {
-      servers.value = await serversApi.list()
+      await serversStore.fetchAll()
       if (selectedServerId.value && !servers.value.find((s) => s.id === selectedServerId.value)) {
         selectedServerId.value = null
         selectedInstanceId.value = null
       }
       if (selectedServerId.value) {
-        instances.value = await vpnInstancesApi.list(selectedServerId.value)
+        await refreshInstances()
         if (
           selectedInstanceId.value &&
           !instances.value.find((i) => i.id === selectedInstanceId.value)
@@ -60,14 +76,7 @@ export const useContextStore = defineStore('context', () => {
   async function setServer(id: number | null) {
     selectedServerId.value = id
     selectedInstanceId.value = null
-    instances.value = []
-    if (id) {
-      try {
-        instances.value = await vpnInstancesApi.list(id)
-      } catch {
-        // non-fatal
-      }
-    }
+    await refreshInstances()
   }
 
   function setInstance(id: number | null) {
@@ -84,5 +93,6 @@ export const useContextStore = defineStore('context', () => {
     init,
     setServer,
     setInstance,
+    refreshInstances,
   }
 })
