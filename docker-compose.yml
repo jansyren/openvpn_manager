@@ -14,11 +14,25 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     env_file: .env
+    # Shared auth state (token blacklist + login lockout) lives in Redis so it
+    # survives restarts and is consistent across workers/replicas. This overrides
+    # any REDIS_URL in .env.
+    environment:
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - ./backups:/app/backups
       - ./private.pem:/app/private.pem:ro
@@ -27,6 +41,8 @@ services:
       - "8000:8000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 

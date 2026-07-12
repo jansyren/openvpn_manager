@@ -5,11 +5,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, NotFoundError
-from app.core.security import hash_password
+from app.core.security import hash_password_async
 from app.db.models.user import User
 from app.db.session import get_db
 from app.dependencies import get_active_role, get_current_operator, get_current_superuser
 from app.schemas.user_management import UserCreate, UserManagementRead, UserUpdate
+from app.services import audit_service
 from app.services.auth_service import create_user, persist_user_roles
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -28,7 +29,7 @@ async def list_users(
 async def create_user_endpoint(
     body: UserCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_superuser),
+    current_user: User = Depends(get_current_superuser),
 ) -> UserManagementRead:
     if body.auth_source == "ldap":
         from app.core.exceptions import ValidationError
@@ -49,6 +50,11 @@ async def create_user_endpoint(
         await persist_user_roles(db, user, {body.role}, source="manual")
     else:
         user = await create_user(db, body.username, body.password, body.role, body.is_active)
+    await audit_service.record(
+        db, user_id=current_user.id, action="user.create", resource_type="user",
+        resource_id=user.id, detail={"username": user.username, "role": user.role,
+                                     "auth_source": user.auth_source},
+    )
     return UserManagementRead.model_validate(user)
 
 
@@ -81,13 +87,22 @@ async def update_user(
         raise ForbiddenError("Cannot modify your own role")
 
     if body.password is not None:
-        user.hashed_password = hash_password(body.password)
+        user.hashed_password = await hash_password_async(body.password)
     if body.role is not None:
         await persist_user_roles(db, user, {body.role}, source="manual")
     if body.is_active is not None:
         user.is_active = body.is_active
 
     await db.flush()
+    await audit_service.record(
+        db, user_id=current_user.id, action="user.update", resource_type="user",
+        resource_id=user.id,
+        detail={
+            "password_changed": body.password is not None,
+            "role": body.role,
+            "is_active": body.is_active,
+        },
+    )
     return UserManagementRead.model_validate(user)
 
 
@@ -110,5 +125,10 @@ async def delete_user(
     if not is_admin and user.role != "vpn_user":
         raise ForbiddenError("Operators may only delete vpn_user accounts")
 
+    username = user.username
     await db.delete(user)
     await db.flush()
+    await audit_service.record(
+        db, user_id=current_user.id, action="user.delete", resource_type="user",
+        resource_id=user_id, detail={"username": username},
+    )
