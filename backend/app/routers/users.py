@@ -45,7 +45,7 @@ async def create_user_endpoint(
         )
         db.add(user)
         await db.flush()
-        await persist_user_roles(db, user, {body.role})
+        await persist_user_roles(db, user, {body.role}, source="manual")
     else:
         user = await create_user(db, body.username, body.password, body.role, body.is_active)
     return UserManagementRead.model_validate(user)
@@ -82,7 +82,7 @@ async def update_user(
     if body.password is not None:
         user.hashed_password = hash_password(body.password)
     if body.role is not None:
-        await persist_user_roles(db, user, {body.role})
+        await persist_user_roles(db, user, {body.role}, source="manual")
     if body.is_active is not None:
         user.is_active = body.is_active
 

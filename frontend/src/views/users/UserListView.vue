@@ -142,6 +142,9 @@
           :disabled="editTarget?.id === currentUser?.id"
         />
         <small v-if="editTarget?.id === currentUser?.id" class="text-muted">Cannot modify your own role</small>
+        <small v-else-if="editTarget?.auth_source === 'ldap'" class="text-muted">
+          Grants this role in addition to any roles derived from this user's AD group membership; it survives their next login.
+        </small>
       </div>
       <div class="field field-inline">
         <Checkbox v-model="editForm.is_active" :binary="true" input-id="edit-active" />
