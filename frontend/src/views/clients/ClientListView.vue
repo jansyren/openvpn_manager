@@ -330,19 +330,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.action-btns {
-  display: flex;
-  gap: 0.5rem;
-}
-.field {
-  margin-bottom: 1rem;
-}
-.field label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-weight: 600;
-  font-size: 0.875rem;
-}
+/* .field, .field-inline, .action-btns come from assets/utilities.css */
 .section-label {
   font-weight: 700;
   font-size: 0.875rem;
@@ -359,10 +347,5 @@ onMounted(async () => {
 .cert-serial {
   font-family: monospace;
   font-size: 0.8rem;
-}
-.field-inline {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 </style>

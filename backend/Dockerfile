@@ -19,20 +19,30 @@ ENV JWT_PRIVATE_KEY_PATH=/app/test_private.pem \
     JWT_PUBLIC_KEY_PATH=/app/test_public.pem \
     DATABASE_URL=sqlite+aiosqlite:///./test.db \
     APP_SECRET_KEY=test-secret-key-at-least-32-characters! \
-    SSH_KEY_ENCRYPTION_SECRET=test-ssh-encryption-secret
+    SSH_KEY_ENCRYPTION_SECRET=test-ssh-encryption-secret-at-least-32 \
+    RATE_LIMIT_ENABLED=false
 
 CMD ["uv", "run", "pytest", "-v"]
 
 # ── Production stage ──────────────────────────────────────────────────────────
 FROM base AS production
 
-COPY pyproject.toml .
+COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev
 
 COPY . .
 
-RUN chmod +x entrypoint.sh
+# Run as a non-root user; ensure app dir (incl. the backups volume mount point)
+# is writable by it.
+RUN chmod +x entrypoint.sh \
+    && useradd -r -u 10001 -m appuser \
+    && mkdir -p /app/backups \
+    && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)"
 
 CMD ["./entrypoint.sh"]
