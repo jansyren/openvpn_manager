@@ -20,7 +20,7 @@ class LdapConfig(Base, TimestampMixin):
     group_search_base: Mapped[str | None] = mapped_column(String(512), nullable=True)
     group_member_attr: Mapped[str] = mapped_column(String(64), default="member", nullable=False)
     use_tls: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    tls_verify_cert: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    tls_verify_cert: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     ca_cert_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

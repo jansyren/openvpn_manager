@@ -14,6 +14,7 @@ from app.db.models.vpn_client import VpnClient
 from app.db.models.vpn_instance import VpnInstance
 from app.db.models.vpn_instance_ldap_group import VpnInstanceLdapGroup
 from app.db.session import get_db
+from app.db.utils import get_or_404
 from app.dependencies import get_current_superuser
 from app.schemas.ldap import (
     LdapConfigCreate,
@@ -447,16 +448,8 @@ async def sync_ldap_users(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _get_config_or_404(db: AsyncSession, config_id: int) -> LdapConfig:
-    result = await db.execute(select(LdapConfig).where(LdapConfig.id == config_id))
-    cfg = result.scalar_one_or_none()
-    if cfg is None:
-        raise NotFoundError(f"LDAP config {config_id} not found")
-    return cfg
+    return await get_or_404(db, LdapConfig, config_id, "LDAP config")
 
 
 async def _get_instance_or_404(db: AsyncSession, instance_id: int) -> VpnInstance:
-    result = await db.execute(select(VpnInstance).where(VpnInstance.id == instance_id))
-    instance = result.scalar_one_or_none()
-    if instance is None:
-        raise NotFoundError(f"VPN instance {instance_id} not found")
-    return instance
+    return await get_or_404(db, VpnInstance, instance_id, "VPN instance")

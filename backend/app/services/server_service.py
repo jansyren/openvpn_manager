@@ -5,9 +5,10 @@ import asyncssh
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, NotFoundError, RemoteExecutionError
+from app.core.exceptions import ConflictError, RemoteExecutionError
 from app.core.security import encrypt_ssh_key, encrypt_sudo_password
 from app.db.models.server import Server
+from app.db.utils import get_or_404
 from app.schemas.server import ServerCreate, ServerUpdate
 from app.services.config_parser import parse_config
 from app.services.remote.local_executor import LocalExecutor
@@ -20,11 +21,7 @@ async def get_servers(db: AsyncSession) -> list[Server]:
 
 
 async def get_server(db: AsyncSession, server_id: int) -> Server:
-    result = await db.execute(select(Server).where(Server.id == server_id))
-    server = result.scalar_one_or_none()
-    if server is None:
-        raise NotFoundError(f"Server {server_id} not found")
-    return server
+    return await get_or_404(db, Server, server_id, "Server")
 
 
 async def create_server(db: AsyncSession, data: ServerCreate) -> Server:

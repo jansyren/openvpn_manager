@@ -34,9 +34,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    # TLS is expected to be terminated by an external reverse proxy in front of
+    # this service. The nginx image here serves plain HTTP on :80 only.
     ports:
       - "8080:80"
-      - "12443:443"
     depends_on:
       - backend
     restart: unless-stopped

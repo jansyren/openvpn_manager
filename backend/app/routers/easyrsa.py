@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.user import User
 from app.db.models.vpn_instance import VpnInstance
 from app.db.session import get_db
+from app.db.utils import get_or_404
 from app.dependencies import get_current_superuser, get_current_user
 from app.schemas.easyrsa import (
     EasyRsaBuildCa,
@@ -34,12 +34,7 @@ _DEFAULT_PKI_DIR = "/etc/easy-rsa/pki"
 
 
 async def _get_instance(instance_id: int, db: AsyncSession) -> VpnInstance:
-    result = await db.execute(select(VpnInstance).where(VpnInstance.id == instance_id))
-    instance = result.scalar_one_or_none()
-    if instance is None:
-        from app.core.exceptions import NotFoundError
-        raise NotFoundError(f"VPN instance {instance_id} not found")
-    return instance
+    return await get_or_404(db, VpnInstance, instance_id, "VPN instance")
 
 
 async def _get_easyrsa_executor(instance: VpnInstance, db: AsyncSession):

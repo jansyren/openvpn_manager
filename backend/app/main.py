@@ -4,12 +4,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi import _rate_limit_exceeded_handler
 
 from app.config import get_settings
 from app.core.exceptions import AppError, app_error_handler, http_exception_handler
 from app.core.logging import RequestLoggingMiddleware, configure_logging
+from app.core.rate_limit import limiter
 
 from app.routers import auth, backup, certificates, clients, deploy, easyrsa, ldap, pam, routes, servers, system, users, vpn_instances
 
@@ -65,7 +67,14 @@ def create_app() -> FastAPI:
     # ── Request logging ─────────────────────────────────────────────────────
     app.add_middleware(RequestLoggingMiddleware)
 
+    # ── Rate limiting (slowapi) ─────────────────────────────────────────────
+    # Global default limit applies to all routes; the login endpoint adds a
+    # stricter per-route limit via decorator. Keyed on client IP.
+    app.state.limiter = limiter
+    app.add_middleware(SlowAPIMiddleware)
+
     # ── Exception handlers ──────────────────────────────────────────────────
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
     app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
 
