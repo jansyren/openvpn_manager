@@ -19,24 +19,38 @@ from app.core.security import (
 from app.db.models.user import User
 
 
-async def persist_user_roles(db: AsyncSession, user: User, roles: set[str] | list[str]) -> list[str]:
-    """Replace `user`'s rows in user_roles with exactly `roles`, set user.role to the
-    highest-priority role among them, and return the roles sorted highest-priority-first.
+async def persist_user_roles(
+    db: AsyncSession, user: User, roles: set[str] | list[str], source: str = "ldap"
+) -> list[str]:
+    """Replace `user`'s user_roles rows tagged with `source` (rows from other sources
+    are left untouched), then recompute user.role as the highest-priority role across
+    ALL sources combined. Returns the full merged role set, highest-priority-first.
+
+    `source="ldap"` is used for AD-group-derived roles, recomputed wholesale on every
+    LDAP login. `source="manual"` is used for admin-assigned overrides (via the Users
+    page) that must survive that recompute rather than being wiped by it — so an
+    LDAP login only ever clears/rewrites its own "ldap" rows.
 
     `user` must already have a primary key (flushed/inserted).
     """
     from app.db.models.user_role import UserRole
-    from app.services.ldap_service import ROLE_PRIORITY, pick_primary_role
+    from app.services.ldap_service import pick_primary_role
 
-    role_set = set(roles) or {"vpn_user"}
-    user.role = pick_primary_role(role_set) or "vpn_user"
+    role_set = set(roles)
+    if source == "ldap" and not role_set:
+        role_set = {"vpn_user"}
 
-    await db.execute(delete(UserRole).where(UserRole.user_id == user.id))
+    await db.execute(
+        delete(UserRole).where(UserRole.user_id == user.id, UserRole.source == source)
+    )
     for r in role_set:
-        db.add(UserRole(user_id=user.id, role=r))
+        db.add(UserRole(user_id=user.id, role=r, source=source))
     await db.flush()
 
-    return sorted(role_set, key=lambda r: ROLE_PRIORITY.get(r, 0), reverse=True)
+    merged = await get_available_roles(db, user)
+    user.role = pick_primary_role(merged) or "vpn_user"
+    await db.flush()
+    return merged
 
 
 async def get_available_roles(db: AsyncSession, user: User) -> list[str]:
@@ -280,7 +294,7 @@ async def create_user(
     )
     db.add(user)
     await db.flush()
-    await persist_user_roles(db, user, {role})
+    await persist_user_roles(db, user, {role}, source="manual")
     return user
 
 
@@ -299,5 +313,5 @@ async def create_initial_superuser(db: AsyncSession, username: str, password: st
     )
     db.add(user)
     await db.flush()
-    await persist_user_roles(db, user, {"admin"})
+    await persist_user_roles(db, user, {"admin"}, source="manual")
     return user
