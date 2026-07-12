@@ -20,7 +20,7 @@ A web-based management tool for OpenVPN servers. Manage configuration, certifica
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python 3.12, FastAPI, SQLAlchemy (async), SQLite / PostgreSQL |
+| Backend | Python 3.12, FastAPI, SQLAlchemy (async), PostgreSQL (SQLite is used only for the in-memory test suite) |
 | Frontend | Vue 3, TypeScript, Vite, PrimeVue 4, Pinia, Axios |
 | Remote execution | asyncssh — all commands run via SSH on remote servers |
 | Auth | JWT RS256 — 15 min access tokens + 7-day httpOnly refresh cookie |
@@ -60,6 +60,11 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 ```
 
+> **Database note:** `alembic upgrade` requires **PostgreSQL**. Some migrations
+> use `ALTER TABLE … ADD CONSTRAINT`, which SQLite does not support, so SQLite
+> cannot be used as a development database via migrations. SQLite is used only by
+> the test suite, which builds the schema directly with `Base.metadata.create_all`.
+
 **Frontend**
 
 ```bash
@@ -76,7 +81,7 @@ Key environment variables (see `.env.example` for the full list):
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | SQLite (`sqlite+aiosqlite:///./app.db`) or PostgreSQL |
+| `DATABASE_URL` | PostgreSQL (e.g. `postgresql+asyncpg://…`). Required for migrations; SQLite is test-only |
 | `JWT_PRIVATE_KEY_PATH` | Path to RS256 private key |
 | `JWT_PUBLIC_KEY_PATH` | Path to RS256 public key |
 | `SSH_KEY_ENCRYPTION_SECRET` | Secret used to encrypt stored SSH private keys |

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -8,6 +8,9 @@ from app.db.base import Base, TimestampMixin
 
 class Certificate(Base, TimestampMixin):
     __tablename__ = "certificates"
+    __table_args__ = (
+        UniqueConstraint("vpn_instance_id", "serial", name="uq_certificates_instance_serial"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     vpn_instance_id: Mapped[int] = mapped_column(

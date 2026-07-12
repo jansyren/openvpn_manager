@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Generate JWT test keys
+        run: |
+          openssl genrsa -out test_private.pem 2048
+          openssl rsa -in test_private.pem -pubout -out test_public.pem
+
+      # Lint and type-check are advisory for now: the codebase has pre-existing
+      # ruff/mypy debt (tracked in docs/IMPROVEMENTS.md) that predates CI. They
+      # report findings without failing the build; tighten to blocking once the
+      # backlog is worked down.
+      - name: Lint (ruff)
+        run: uv run ruff check .
+        continue-on-error: true
+
+      - name: Type-check (mypy)
+        run: uv run mypy app
+        continue-on-error: true
+
+      - name: Tests (pytest)
+        run: uv run pytest
+        env:
+          APP_ENV: development
+          APP_SECRET_KEY: ci-secret-key-at-least-32-characters-long
+          APP_DEBUG: "false"
+          JWT_PRIVATE_KEY_PATH: ./test_private.pem
+          JWT_PUBLIC_KEY_PATH: ./test_public.pem
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          SSH_KEY_ENCRYPTION_SECRET: ci-ssh-key-encryption-secret-at-least-32
+          # Disable rate limiting globally for the suite; the rate-limit test
+          # enables it locally for itself.
+          RATE_LIMIT_ENABLED: "false"
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:unit

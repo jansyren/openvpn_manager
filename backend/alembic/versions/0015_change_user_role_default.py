@@ -8,7 +8,6 @@ A user created without an explicit role must default to the lowest-privilege
 role, not admin. This alters the column's server default; existing rows are
 unchanged (their role was set explicitly at creation).
 """
-import sqlalchemy as sa
 from alembic import op
 
 revision = "0015"

@@ -15,7 +15,9 @@ class LdapConfigCreate(BaseModel):
     group_search_base: str | None = None
     group_member_attr: str = Field("member", max_length=64)
     use_tls: bool = True
-    tls_verify_cert: bool = False
+    # Secure default: verify the directory's TLS certificate. Set to false only
+    # for a directory using a self-signed cert you cannot pin via ca_cert_pem.
+    tls_verify_cert: bool = True
     ca_cert_pem: str | None = None
     is_active: bool = True
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, LargeBinary, String
+from sqlalchemy import Boolean, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -6,6 +6,9 @@ from app.db.base import Base, TimestampMixin
 
 class VpnClient(Base, TimestampMixin):
     __tablename__ = "vpn_clients"
+    __table_args__ = (
+        UniqueConstraint("vpn_instance_id", "name", name="uq_vpn_clients_instance_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     vpn_instance_id: Mapped[int] = mapped_column(

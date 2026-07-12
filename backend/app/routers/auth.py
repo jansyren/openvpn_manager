@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.rate_limit import LOGIN_RATE_LIMIT, limiter
 from app.core.security import blacklist_token, decode_token
 from app.db.session import get_db
 from app.dependencies import get_active_role, get_client_ip, get_current_user
@@ -31,6 +32,7 @@ _COOKIE_MAX_AGE = 7 * 24 * 3600  # 7 days
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit(LOGIN_RATE_LIMIT)
 async def login(
     body: LoginRequest,
     response: Response,
@@ -74,6 +76,10 @@ async def logout(
             blacklist_token(jti, exp)
         except Exception:
             pass
+
+    # Also blacklist the refresh token so it cannot be used to mint new access
+    # tokens after logout (it outlives the access token by up to 7 days).
+    _blacklist_refresh_cookie(request)
 
     response.delete_cookie(_REFRESH_COOKIE, path="/api/v1/auth", secure=get_settings().is_production)
     return {"message": "Logged out successfully"}
@@ -179,4 +185,19 @@ async def change_my_password(
             pass
 
     await change_password(db, current_user, body.current_password, body.new_password, jti, exp)
+    # Revoke the refresh token too, so a changed password fully invalidates the session.
+    _blacklist_refresh_cookie(request)
     return {"message": "Password changed successfully"}
+
+
+def _blacklist_refresh_cookie(request: Request) -> None:
+    """Best-effort: blacklist the refresh token carried in the request cookie."""
+    refresh_token = request.cookies.get(_REFRESH_COOKIE)
+    if not refresh_token:
+        return
+    try:
+        payload = decode_token(refresh_token, expected_type="refresh")
+        exp = datetime.fromtimestamp(payload.get("exp", 0), tz=UTC)
+        blacklist_token(payload.get("jti", ""), exp)
+    except Exception:
+        pass

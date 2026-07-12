@@ -5,6 +5,12 @@ from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+@lru_cache
+def _read_pem(path: str) -> str:
+    """Read a PEM file once and cache it (keyed on path)."""
+    return Path(path).read_text()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -39,6 +45,7 @@ class Settings(BaseSettings):
     backup_max_retention_days: int = 30
 
     # Rate limiting
+    rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 60
     login_rate_limit_per_minute: int = 10
 
@@ -56,18 +63,25 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
 
     @model_validator(mode="after")
-    def validate_secret_key_length(self) -> "Settings":
+    def validate_and_harden(self) -> "Settings":
         if len(self.app_secret_key) < 32:
             raise ValueError("APP_SECRET_KEY must be at least 32 characters long")
+        # SSH_KEY_ENCRYPTION_SECRET roots ALL secret encryption (SSH keys, sudo/CA/
+        # LDAP passwords), so it must be present and non-trivial.
+        if len(self.ssh_key_encryption_secret) < 32:
+            raise ValueError("SSH_KEY_ENCRYPTION_SECRET must be at least 32 characters long")
+        # Debug must never be on in production, regardless of how it was set.
+        if self.app_env == "production" and self.app_debug:
+            self.app_debug = False
         return self
 
     @property
     def jwt_private_key(self) -> str:
-        return self.jwt_private_key_path.read_text()
+        return _read_pem(str(self.jwt_private_key_path))
 
     @property
     def jwt_public_key(self) -> str:
-        return self.jwt_public_key_path.read_text()
+        return _read_pem(str(self.jwt_public_key_path))
 
     @property
     def is_production(self) -> bool:

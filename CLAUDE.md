@@ -89,7 +89,7 @@ SQLite/PostgreSQL  |  SSH Execution (asyncssh)  |  File I/O
 
 Copy `.env.example` to `.env`. Key variables:
 - `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` — RS256 PEM key paths
-- `DATABASE_URL` — SQLite for dev, PostgreSQL for prod
+- `DATABASE_URL` — PostgreSQL (required for `alembic upgrade`; SQLite is used only by the test suite, which builds the schema via `create_all`, not migrations)
 - `SSH_KEY_ENCRYPTION_SECRET` — AES-256-GCM encryption key
 - `APP_SECRET_KEY` — ≥32 chars
 
