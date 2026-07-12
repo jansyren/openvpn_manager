@@ -17,6 +17,8 @@ export const useAuthStore = defineStore('auth', () => {
   const activeRole = computed(() => currentUser.value?.active_role ?? null)
   // "Admin-capable right now" — mirrors backend get_current_superuser's is_superuser-OR-admin-role check.
   const canAdminister = computed(() => isSuperuser.value || activeRole.value === 'admin')
+  // "Operator-capable right now" — mirrors backend get_current_operator's check.
+  const canOperate = computed(() => canAdminister.value || activeRole.value === 'operator')
   // Nav rendering reflects the CURRENTLY ACTIVE role, not just the DB-stored primary role.
   const isVpnUser = computed(() => activeRole.value === 'vpn_user')
   // Hard route lock-in: only when vpn_user is the user's ONLY resolved role (no switcher escape hatch).
@@ -82,6 +84,7 @@ export const useAuthStore = defineStore('auth', () => {
     roles,
     activeRole,
     canAdminister,
+    canOperate,
     isVpnUser,
     isVpnUserOnly,
     login,

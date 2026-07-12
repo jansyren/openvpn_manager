@@ -104,7 +104,7 @@ const router = createRouter({
           path: 'users',
           name: 'users',
           component: () => import('@/views/users/UserListView.vue'),
-          meta: { requiresAdmin: true },
+          meta: { requiresOperator: true },
         },
         // LDAP / Active Directory
         {
@@ -142,6 +142,10 @@ router.beforeEach(async (to) => {
   }
 
   if (to.meta.requiresAdmin && !authStore.canAdminister) {
+    return { name: 'dashboard' }
+  }
+
+  if (to.meta.requiresOperator && !authStore.canOperate) {
     return { name: 'dashboard' }
   }
 
