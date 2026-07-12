@@ -257,3 +257,21 @@ cd frontend && npm run test:unit
 # Frontend e2e tests
 cd frontend && npm run test:e2e
 ```
+
+## Versioning & Releases
+
+Each tier has a single source of truth for its version:
+
+- **Backend** — `backend/pyproject.toml` `version` (read at runtime from package metadata and returned by `GET /api/v1/system/info`).
+- **Frontend** — `frontend/package.json` `version` (baked into the bundle at build time).
+
+To cut a release, bump both to the same semver value and tag the commit. The running versions are shown in the UI: the frontend version on the login page, and both the frontend (`UI`) and backend (`API`) versions in the sidebar footer (hover for the git commit).
+
+For precise build identification, pass the git commit at build time so it appears alongside the version:
+
+```bash
+GIT_COMMIT=$(git rev-parse --short HEAD) BUILD_TIME=$(date -u +%FT%TZ) \
+  docker compose up -d --build
+```
+
+If unset, the commit/build-time simply read `unknown` — the semver versions still display.

@@ -1,0 +1,5 @@
+/// <reference types="vite/client" />
+
+// Injected at build time by vite (see vite.config.ts `define`).
+declare const __APP_VERSION__: string
+declare const __GIT_COMMIT__: string

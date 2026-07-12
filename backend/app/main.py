@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.core.exceptions import AppError, app_error_handler, http_exception_handler
 from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.core.rate_limit import limiter
+from app.version import VERSION
 
 from app.routers import auth, backup, certificates, clients, deploy, easyrsa, ldap, pam, routes, servers, system, users, vpn_instances
 
@@ -32,7 +33,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="OpenVPN Manager",
-        version="0.1.0",
+        version=VERSION,
         description="OpenVPN server management API",
         docs_url="/api/docs" if not settings.is_production else None,
         redoc_url="/api/redoc" if not settings.is_production else None,

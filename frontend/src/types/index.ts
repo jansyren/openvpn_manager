@@ -1,3 +1,13 @@
+// ── System ────────────────────────────────────────────────────────────────
+export interface SystemInfo {
+  app_version: string
+  git_commit: string
+  build_time: string
+  openvpn_version: string | null
+  python_version: string
+  environment: string
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 export interface LoginRequest {
   username: string

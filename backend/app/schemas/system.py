@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 
 class SystemInfo(BaseModel):
     app_version: str
+    git_commit: str
+    build_time: str
     openvpn_version: str | None
     python_version: str
     environment: str

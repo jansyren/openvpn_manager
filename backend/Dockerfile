@@ -32,6 +32,12 @@ RUN uv sync --no-dev
 
 COPY . .
 
+# Build metadata surfaced via /api/v1/system/info (git_commit / build_time).
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ENV GIT_COMMIT=$GIT_COMMIT \
+    BUILD_TIME=$BUILD_TIME
+
 # Run as a non-root user; ensure app dir (incl. the backups volume mount point)
 # is writable by it.
 RUN chmod +x entrypoint.sh \
