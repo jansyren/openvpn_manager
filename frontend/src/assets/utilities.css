@@ -1,0 +1,21 @@
+/* Shared layout utility classes, previously duplicated in ~13 views' scoped
+   <style> blocks. The PageHeader component covers .page-header/.page-title. */
+
+.field {
+  margin-bottom: 1rem;
+}
+.field label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.action-btns {
+  display: flex;
+  gap: 0.5rem;
+}

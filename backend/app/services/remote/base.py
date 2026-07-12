@@ -144,13 +144,27 @@ def prepare_sudo_command(
 
 
 def _validate_binary(cmd: list[str]) -> None:
-    """Raise if the binary is not in the allowed whitelist."""
+    """Raise if the binary is not in the allowed whitelist.
+
+    When the command is wrapped in ``sudo``, the whitelist is enforced on the
+    REAL binary being run under sudo (after sudo's own flags), not just on
+    ``sudo`` itself — otherwise the whitelist would be a no-op for every
+    privileged command.
+    """
     from app.core.exceptions import RemoteExecutionError
 
     if not cmd:
         raise RemoteExecutionError("Empty command")
 
-    binary = cmd[0]
+    idx = 0
+    if cmd[0] == _SUDO:
+        idx = 1
+        while idx < len(cmd) and cmd[idx].startswith("-"):
+            idx += 1  # skip sudo flags (-S / -n / -E)
+        if idx >= len(cmd):
+            raise RemoteExecutionError("sudo invoked without a target binary")
+
+    binary = cmd[idx]
     if binary not in ALLOWED_BINARIES:
         raise RemoteExecutionError(
             f"Execution of '{binary}' is not permitted. "

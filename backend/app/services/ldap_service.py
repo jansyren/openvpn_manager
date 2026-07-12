@@ -20,6 +20,29 @@ if TYPE_CHECKING:
 ROLE_PRIORITY = {"admin": 4, "operator": 3, "viewer": 2, "vpn_user": 1}
 
 
+# Cache of CA-cert temp files, keyed by cert content hash. ldap3 reads the
+# ca_certs_file lazily at bind time, so the file must outlive this function;
+# caching by content means we create at most one temp file per unique CA cert
+# instead of leaking a new one on every connection.
+_CA_FILE_CACHE: dict[str, str] = {}
+
+
+def _ca_cert_file(pem: str) -> str:
+    import hashlib
+    import os
+    import tempfile
+
+    digest = hashlib.sha256(pem.encode()).hexdigest()
+    cached = _CA_FILE_CACHE.get(digest)
+    if cached and os.path.exists(cached):
+        return cached
+    fd, path = tempfile.mkstemp(suffix=".pem", prefix="ldap_ca_")
+    with os.fdopen(fd, "w") as f:
+        f.write(pem)
+    _CA_FILE_CACHE[digest] = path
+    return path
+
+
 def _make_server(config: "LdapConfig"):
     """Build an ldap3 Server object from a config record."""
     from ldap3 import Server, Tls
@@ -29,11 +52,7 @@ def _make_server(config: "LdapConfig"):
     if not config.tls_verify_cert:
         tls = Tls(validate=ssl.CERT_NONE)
     elif config.ca_cert_pem:
-        import tempfile, os
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pem")
-        tmp.write(config.ca_cert_pem.encode())
-        tmp.close()
-        tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=tmp.name)
+        tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=_ca_cert_file(config.ca_cert_pem))
 
     use_ssl = config.server_url.lower().startswith("ldaps://")
     return Server(config.server_url, use_ssl=use_ssl, tls=tls, connect_timeout=10)
